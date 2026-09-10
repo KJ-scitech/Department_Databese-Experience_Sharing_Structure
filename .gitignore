@@ -1,0 +1,14 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# 敏感数据：真实成员数据不入库
+secrets/
+*.secret
+*.local
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
