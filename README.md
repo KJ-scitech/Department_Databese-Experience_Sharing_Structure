@@ -30,10 +30,7 @@ scitech-kb/
 │   ├── 需求文档.md           # 需求（what/why）：目标、角色权限、数据模型、功能
 │   └── 交接文档.md           # 交接（how）：数据源、初始化、部署、待办
 ├── schema/
-│   └── schema.sql          # MySQL 建表 DDL + 视图
-└── data/
-    ├── activities-seed.sql # 19 项活动系列种子数据
-    └── activities-seed.md  # 种子数据说明
+│   └── schema.sql          # MySQL 建表 DDL + 视图（关系模式）
 ```
 
 ## 快速开始
@@ -41,8 +38,6 @@ scitech-kb/
 ```bash
 # 建库建表
 mysql -u root -p < schema/schema.sql
-# 导入活动系列
-mysql -u root -p scitech_kb < data/activities-seed.sql
 ```
 
 ## 文档导航
@@ -62,6 +57,6 @@ mysql -u root -p scitech_kb < data/activities-seed.sql
 
 ## 状态
 
-- 需求、schema、活动种子数据：已完成
-- 建库、成员导入、录入工具、经验库对接：待技术组推进
+- 需求、schema：已完成
+- 建库、数据导入、录入工具、经验库对接：待技术组推进
 - 待确认项见 `docs/需求文档.md` 附录

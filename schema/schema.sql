@@ -149,12 +149,12 @@ CREATE TABLE privacy_consent (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='隐私授权记录';
 
 -- ------------------------------------------------------------
--- 7. 账号表（南大统一身份 CAS 绑定）
+-- 7. 账号表（学校统一身份 CAS 绑定）
 -- ------------------------------------------------------------
 CREATE TABLE account (
     id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     member_id     BIGINT UNSIGNED NOT NULL COMMENT '→ member.id',
-    cas_uid       VARCHAR(50)     NOT NULL COMMENT '南大统一身份uid（学号/工号）',
+    cas_uid       VARCHAR(50)     NOT NULL COMMENT '统一身份uid（学号/工号）',
     role          VARCHAR(20)     NOT NULL DEFAULT '部员' COMMENT '管理员/管理层/部员/外部',
     last_login_at DATETIME        DEFAULT NULL,
     created_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
