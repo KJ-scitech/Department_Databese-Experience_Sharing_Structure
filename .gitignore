@@ -1,14 +1,72 @@
-# OS
+# ============================================================
+# 学术科创部知识库 · .gitignore
+# 原则：框架（schema / 代码 / 文档 / 配置模板）可上传；
+#       具体数据、敏感信息、密钥一律禁止上传。
+# ============================================================
+
+# ---------- 1. 数据（完全禁止）----------
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+*.mdb
+*.accdb
+
+# 数据导出 / 备份（csv / excel / tsv / dump）
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.ods
+*export*
+*backup*
+*导出*
+*备份*
+*dump*
+
+# SQL：只允许 schema/ 下的结构定义，其他一律排除
+*.sql
+!schema/*.sql
+
+# 数据目录
+data/
+**/data/
+!schema/
+
+# ---------- 2. 成员 / 个人信息 ----------
+*成员*
+*名单*
+*通讯录*
+*信息表*
+*报名*
+*签到*
+
+# ---------- 3. 密钥 / 凭证 ----------
+.env
+*.env
+.env.*
+secrets/
+.secure/
+*.key
+*.pem
+*.p12
+*.pfx
+*token*
+*secret*
+*credential*
+*.secret
+
+# ---------- 4. 系统 / 编辑器 ----------
 .DS_Store
 Thumbs.db
+.idea/
+.vscode/
+*.swp
 
-# 敏感数据：真实成员数据不入库
-secrets/
-*.secret
-*.local
-
-# Python
+# ---------- 5. 运行时 ----------
 __pycache__/
 *.pyc
+*.log
 .venv/
 venv/
+node_modules/

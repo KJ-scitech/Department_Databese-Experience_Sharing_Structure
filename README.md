@@ -55,6 +55,12 @@ mysql -u root -p < schema/schema.sql
 
 同步以单向导入为主（在线平台 → MySQL）。
 
+## 协作与安全
+
+- 协作流程、提交红线：见 [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- **敏感信息（成员、联系方式、参与记录）只能放内网 MySQL 与内部在线表格，禁止提交本仓库**
+- `main` 分支受保护，改动需 PR + owner 审核后 merge
+
 ## 状态
 
 - 需求、schema：已完成
