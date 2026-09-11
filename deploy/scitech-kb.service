@@ -1,0 +1,67 @@
+# 知识库 API 的 systemd 服务单元。
+#
+# 安装位置：/etc/systemd/system/scitech-kb.service
+#
+# 注意：这个文件**不能**由共享账号直接放进去——
+# 共享账号没有 sudo，/etc/systemd/system/ 对它只读。
+# 装这个单元要找服务器管理员。详细步骤见同目录的 部署说明.md。
+#
+# 文件里的账号名和路径都是占位写法（<共享账号>）。
+# 真实账号名见交接文档——本仓库是公开的，基础设施信息不写进来。
+# 代码放在别的地方就要同步改下面六处：
+#   User / Group / WorkingDirectory / ExecStart / ReadWritePaths / Environment=HF_HOME
+#
+# 改完必须跑 systemctl daemon-reload，否则 systemd 还用旧配置，
+# 而且不会报任何错——典型的"改了没生效"。
+
+[Unit]
+Description=学创部知识库 API（FastAPI + Chroma 向量检索）
+Documentation=https://github.com/KJ-scitech/Department_Databese-Experience_Sharing_Structure
+After=network-online.target mysql.service
+Wants=network-online.target
+# 如果服务器上的 MySQL 单元名不是 mysql.service，
+# 用 `systemctl list-units --type=service | grep -i mysql` 查一下实际名字再改。
+# 名字写错不会导致服务起不来，只是少了"等数据库就绪"这层保护。
+
+[Service]
+Type=simple
+User=<共享账号>
+Group=<共享账号>
+WorkingDirectory=/home/<共享账号>/knowledge-base
+
+ExecStart=/home/<共享账号>/knowledge-base/.venv/bin/python -m uvicorn api.main:app \
+    --host 127.0.0.1 --port 8000
+
+# 只监听回环地址：QQBot 和知识库在同一台机器上，走 127.0.0.1 就够了。
+# 绑 127.0.0.1 而不是 0.0.0.0，是因为 CORS 现在是 allow_origins=["*"]，
+# 直接对外暴露等于把整个库（含成员信息）敞给能连到这个端口的人。
+# 以后确实需要外部访问，先收紧 CORS 再改这里。
+
+# 日志直接进 journald，用 journalctl 看：
+#   journalctl -u scitech-kb -f
+Environment=PYTHONUNBUFFERED=1
+
+# 向量模型缓存。不固定这个路径的话会落到 ~/.cache/huggingface，
+# 而下面 ProtectHome 把家目录设成了只读，模型下不下来、服务起不来。
+Environment=HF_HOME=/home/<共享账号>/knowledge-base/.cache/huggingface
+
+Restart=always
+RestartSec=5
+
+# 首次启动要加载向量模型，约 20–30 秒。这段时间服务是"在起"的状态，
+# 端口还没监听。别刚 systemctl start 完就 curl，会以为它挂了。
+TimeoutStartSec=120
+TimeoutStopSec=20
+
+# ── 加固 ────────────────────────────────────────────────────
+# 下面几行把服务能碰的范围限制在项目目录内。
+# 如果服务起不来、报的错又看不懂（比如"无法写入"某个意想不到的路径），
+# **先把这几行注释掉再试**——先确认业务能跑通，再回头收紧。
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/<共享账号>/knowledge-base/data /home/<共享账号>/knowledge-base/.cache
+
+[Install]
+WantedBy=multi-user.target

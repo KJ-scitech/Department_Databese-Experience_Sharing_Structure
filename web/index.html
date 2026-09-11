@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>学创部知识库 · 演示</title>
+<!-- 空图标：不写这行浏览器会去要 /favicon.ico，拿不到就在控制台留一条红色
+     404。那条红字跟本项目无关，但组员一打开开发者工具就会看到，
+     容易当成真出了错。一个内联空图标消掉它，省得每次都要解释。 -->
+<link rel="icon" href="data:,">
+<style>
+  /* 只用一个文件写完整套样式，方便直接丢给组员看，不用装任何前端工具链 */
+  :root {
+    --bg: #f5f6f8;
+    --card: #fff;
+    --line: #e3e6ea;
+    --text: #1f2328;
+    --muted: #6b7280;
+    --accent: #6d28d9;
+    --accent-soft: #f3eeff;
+    --ok: #15803d;
+    --warn: #b45309;
+    --err: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.7 "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  }
+  header {
+    background: var(--card); border-bottom: 1px solid var(--line);
+    padding: 16px 24px; display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+  }
+  h1 { font-size: 17px; margin: 0; font-weight: 600; }
+  .sub { color: var(--muted); font-size: 12px; }
+  #health { margin-left: auto; font-size: 12px; padding: 4px 10px; border-radius: 999px; background: #eee; }
+  #health.ok { background: #e7f6ec; color: var(--ok); }
+  #health.bad { background: #fdeaea; color: var(--err); }
+
+  nav { display: flex; gap: 4px; padding: 12px 24px 0; flex-wrap: wrap; }
+  nav button {
+    border: 1px solid var(--line); background: var(--card); color: var(--muted);
+    padding: 8px 16px; border-radius: 8px 8px 0 0; cursor: pointer; font-size: 13px;
+    border-bottom: none; font-family: inherit;
+  }
+  nav button.on { background: var(--card); color: var(--accent); font-weight: 600; box-shadow: inset 0 2px 0 var(--accent); }
+
+  main { padding: 0 24px 48px; }
+  section { display: none; }
+  section.on { display: block; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 0 8px 8px 8px;
+    padding: 20px 22px; margin-bottom: 16px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 4px; font-weight: 600; }
+  .card h2 + .hint { margin-bottom: 16px; }
+  .hint { color: var(--muted); font-size: 12.5px; margin: 0 0 12px; }
+  .kbd { background: var(--accent-soft); color: var(--accent); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+
+  input, select, textarea, button.btn {
+    font-family: inherit; font-size: 13px; padding: 8px 10px;
+    border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--text);
+  }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+  textarea { width: 100%; resize: vertical; min-height: 78px; }
+  button.btn {
+    background: var(--accent); color: #fff; border-color: var(--accent); cursor: pointer;
+    padding: 9px 18px; font-weight: 500;
+  }
+  button.btn:hover { opacity: .9; }
+  button.btn:disabled { opacity: .5; cursor: not-allowed; }
+  button.ghost { background: #fff; color: var(--text); border-color: var(--line); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; background: #fafbfc; }
+  tbody tr:hover { background: #fafbfc; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+
+  .hit { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+  .hit .top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+  .score { font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .bar { flex: 1; height: 4px; background: #eee; border-radius: 2px; min-width: 60px; }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+  .tag { background: var(--accent-soft); color: var(--accent); border-radius: 4px; padding: 1px 7px; font-size: 11.5px; }
+  .tag.gray { background: #f0f1f3; color: var(--muted); }
+  .meta { color: var(--muted); font-size: 12px; margin-top: 6px; }
+
+  .empty { color: var(--muted); font-size: 13px; padding: 14px 0; }
+  .msg { font-size: 13px; padding: 9px 12px; border-radius: 6px; margin-top: 10px; display: none; }
+  .msg.show { display: block; }
+  .msg.ok { background: #e7f6ec; color: var(--ok); }
+  .msg.bad { background: #fdeaea; color: var(--err); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>学创部知识库 · 演示</h1>
+  <span class="sub">经验知识库 K1–K3 ＋ 活动分工数据库 K4–K5</span>
+  <span id="health">检查中…</span>
+</header>
+
+<nav>
+  <button data-tab="search" class="on">语义检索 K2</button>
+  <button data-tab="entry">经验录入 K1</button>
+  <button data-tab="duty">活动分工 K4</button>
+  <button data-tab="report">报表统计 K5</button>
+</nav>
+
+<main>
+
+  <!-- ══ K2 语义检索 ══ -->
+  <section id="tab-search" class="on">
+    <div class="card">
+      <h2>用一句话找经验</h2>
+      <p class="hint">
+        这是<b>语义</b>检索，不是关键词匹配。试着搜
+        <span class="kbd">设备出故障了咋办</span>——它能认出「投影仪不亮」那条，
+        而这两句话字面上没有一个字相同。想看得更直白，点旁边的
+        <b>关键词对照</b>：同一个问句用字面匹配去查，一条都查不到。
+      </p>
+      <div class="row">
+        <input id="q" style="flex:1;min-width:260px" placeholder="比如：活动当天投影仪坏了怎么办">
+        <select id="topk">
+          <option value="3">前 3 条</option>
+          <option value="5" selected>前 5 条</option>
+          <option value="10">前 10 条</option>
+        </select>
+        <button class="btn" id="btn-search">语义检索</button>
+        <button class="btn ghost" id="btn-keyword">关键词对照</button>
+      </div>
+      <div id="search-msg" class="msg"></div>
+    </div>
+    <div class="card">
+      <h2>召回结果</h2>
+      <p class="hint">
+        相似度是余弦相似度，越接近 1 越像。经验值：0.55 以上算真的相关，
+        0.4 以下基本是凑数的。这个阈值不用背，用多了自然有感觉。
+      </p>
+      <div id="search-out"><div class="empty">还没有检索。</div></div>
+    </div>
+  </section>
+
+  <!-- ══ K1 经验录入 ══ -->
+  <section id="tab-entry">
+    <div class="card">
+      <h2>录入一条经验</h2>
+      <p class="hint">
+        录入时关联「作者」和「所属活动」——这两个 id 就是数据库和向量库之间的桥。
+        经验正文存在向量库里，数据库里只有这条关联。
+      </p>
+      <div class="grid">
+        <div class="field"><label>类型</label>
+          <select id="e-type" style="width:100%"></select></div>
+        <div class="field"><label>作者</label>
+          <select id="e-author" style="width:100%"></select></div>
+        <div class="field"><label>所属活动</label>
+          <select id="e-activity" style="width:100%"></select></div>
+        <div class="field"><label>标签（逗号分隔）</label>
+          <input id="e-tags" style="width:100%" placeholder="设备, 应急预案"></div>
+      </div>
+      <div class="field" style="margin-bottom:12px">
+        <label>正文</label>
+        <textarea id="e-content" placeholder="把踩过的坑写清楚：什么情况、怎么判断、怎么解决。"></textarea>
+      </div>
+      <button class="btn" id="btn-entry">录入</button>
+      <div id="entry-msg" class="msg"></div>
+    </div>
+    <div class="card">
+      <h2>已入库的经验</h2>
+      <p class="hint">按 id 倒序。这些数据来自 <code>scripts/seed.py</code> 生成的演示数据。</p>
+      <div id="exp-list"><div class="empty">加载中…</div></div>
+    </div>
+  </section>
+
+  <!-- ══ K4 活动分工 ══ -->
+  <section id="tab-duty">
+    <div class="card">
+      <h2>登记一次分工</h2>
+      <p class="hint">
+        记的是「<b>谁 + 哪个活动 + 当时的分工</b>」。
+        同一个人在同一场活动里可以有多个角色——既当主讲又当执行，登记两条就行。
+        完全相同的三者会撞唯一键，接口会拦住并说明原因。
+      </p>
+      <div class="grid">
+        <div class="field"><label>成员</label>
+          <select id="p-member" style="width:100%"></select></div>
+        <div class="field"><label>活动</label>
+          <select id="p-activity" style="width:100%"></select></div>
+        <div class="field"><label>分工</label>
+          <select id="p-role" style="width:100%">
+            <option>负责人</option><option>主讲</option><option>执行</option>
+            <option>志愿者</option><option>观众</option>
+          </select></div>
+        <div class="field"><label>工时（小时，可空）</label>
+          <input id="p-hours" type="number" step="0.5" min="0" style="width:100%" placeholder="3.5"></div>
+      </div>
+      <div class="field" style="margin-bottom:12px">
+        <label>做了什么</label>
+        <input id="p-contribution" style="width:100%" placeholder="比如：做海报、借教室、现场签到">
+      </div>
+      <button class="btn" id="btn-duty">登记</button>
+      <div id="duty-msg" class="msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>成员（对外信息，已脱敏）</h2>
+      <p class="hint">
+        这张表查的是数据库里的 <code>v_member_public</code> 视图。
+        学号、班级、生日、手机、微信、邮箱根本不在视图里——想漏也漏不出来。
+      </p>
+      <div class="row" style="margin-bottom:12px">
+        <input id="m-keyword" placeholder="按姓名或所属组筛选" style="flex:1;min-width:200px">
+        <button class="btn ghost" id="btn-members">查询</button>
+      </div>
+      <div id="member-list"><div class="empty">加载中…</div></div>
+    </div>
+
+    <div class="card">
+      <h2>活动场次</h2>
+      <div id="activity-list"><div class="empty">加载中…</div></div>
+    </div>
+
+    <div class="card">
+      <h2>参与记录</h2>
+      <div id="part-list"><div class="empty">加载中…</div></div>
+    </div>
+  </section>
+
+  <!-- ══ K5 报表 ══ -->
+  <section id="tab-report">
+    <div class="card">
+      <h2>谁还没参与过</h2>
+      <p class="hint">
+        安排轮值先看这张表。注意它用的是 <b>LEFT JOIN</b>——
+        一次都没参与的人也必须出现在结果里，否则「谁还没干过」这件事就看不见了。
+      </p>
+      <div id="never-out"><div class="empty">加载中…</div></div>
+    </div>
+
+    <div class="card">
+      <h2>按人聚合工作量</h2>
+      <p class="hint">
+        点姓名看个人履历。次数为 0 的就是还没排上活的。
+        本系统只统计「干了几次、什么角色」，<b>不做时长发放</b>——五育和志愿时长不由这里产出。
+      </p>
+      <div id="by-member-out"><div class="empty">加载中…</div></div>
+    </div>
+
+    <div class="card">
+      <h2>按学期看参与分布</h2>
+      <p class="hint">人均场次高说明活压在少数人身上，轮值该调了。</p>
+      <div id="rotation-out"><div class="empty">加载中…</div></div>
+    </div>
+
+    <div class="card" id="history-card" style="display:none">
+      <h2>个人履历 <span class="tag gray" id="history-who"></span></h2>
+      <div id="history-out"></div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+// 所有请求都走这一个函数，错误处理只写一遍
+// ══════════════════════════════════════════════════════════════
+async function api(path, options) {
+  const res = await fetch(path, options);
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    // FastAPI 的错误在 detail 里；detail 也可能是个数组（校验错误）
+    const d = data && data.detail;
+    throw new Error(typeof d === 'string' ? d : (d ? JSON.stringify(d) : `HTTP ${res.status}`));
+  }
+  return data;
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+function msg(el, text, ok = true) {
+  el.className = 'msg show ' + (ok ? 'ok' : 'bad');
+  el.textContent = text;
+}
+
+function fill(select, items, placeholder) {
+  select.innerHTML = (placeholder ? `<option value="">${esc(placeholder)}</option>` : '')
+    + items.map(o => `<option value="${o.value}">${esc(o.label)}</option>`).join('');
+}
+
+// ── 标签页 ────────────────────────────────────────────────────
+document.querySelectorAll('nav button').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b === btn));
+    document.querySelectorAll('section').forEach(s => s.classList.toggle('on', s.id === 'tab-' + btn.dataset.tab));
+  };
+});
+
+// ── 健康检查 ──────────────────────────────────────────────────
+(async () => {
+  const el = document.getElementById('health');
+  try {
+    const h = await api('/api/health');
+    el.className = h.ok ? 'ok' : 'bad';
+    el.textContent = h.ok
+      ? `数据库已连接 · 经验 ${h.experience_count} 条 · 模型 ${h.model.split('/').pop()}`
+      : h.database;
+  } catch (e) {
+    el.className = 'bad';
+    el.textContent = '后端未启动';
+  }
+})();
+
+// ══ K2 检索 ══════════════════════════════════════════════════
+const searchOut = document.getElementById('search-out');
+
+async function doSearch() {
+  const q = document.getElementById('q').value.trim();
+  const m = document.getElementById('search-msg');
+  if (!q) return msg(m, '先输入一句话。', false);
+  searchOut.innerHTML = '<div class="empty">检索中…</div>';
+  try {
+    const hits = await api(`/api/experience/search?q=${encodeURIComponent(q)}&top_k=${document.getElementById('topk').value}`);
+    m.className = 'msg';
+    if (!hits.length) {
+      searchOut.innerHTML = '<div class="empty">一条都没召回。向量库可能是空的，先跑 <code>python -m scripts.seed</code>。</div>';
+      return;
+    }
+    searchOut.innerHTML = hits.map(h => {
+      const pct = Math.max(0, Math.min(1, h.similarity)) * 100;
+      const tags = (h.metadata.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join(' ');
+      return `<div class="hit">
+        <div class="top">
+          <span class="tag gray">${esc(h.exp_id)}</span>
+          <span class="tag gray">${esc(h.metadata.type || '')}</span>
+          <span class="score">${h.similarity.toFixed(3)}</span>
+          <span class="bar"><i style="width:${pct}%"></i></span>
+        </div>
+        <div>${esc(h.content)}</div>
+        <div class="meta">${tags}${h.metadata.author_id ? ' · 作者 id ' + esc(h.metadata.author_id) : ''}${h.metadata.activity_id ? ' · 活动 id ' + esc(h.metadata.activity_id) : ''}</div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    searchOut.innerHTML = '<div class="empty">出错了。</div>';
+    msg(m, e.message, false);
+  }
+}
+async function doKeyword() {
+  const q = document.getElementById('q').value.trim();
+  const m = document.getElementById('search-msg');
+  if (!q) return msg(m, '先输入一句话。', false);
+  searchOut.innerHTML = '<div class="empty">查找中…</div>';
+  try {
+    const hits = await api(`/api/experience/keyword?q=${encodeURIComponent(q)}&limit=5`);
+    if (!hits.length) {
+      searchOut.innerHTML = `<div class="empty">
+        <b>字面匹配：0 条。</b><br>
+        库里没有任何一条正文完整包含「${esc(q)}」这几个字。<br>
+        但上面用同一个问句做<b>语义检索</b>时，「投影仪不亮」那条是被召回的。<br>
+        差别就在这里：大家记笔记时的用词各不相同，靠字面查是查不到的。
+      </div>`;
+      msg(m, '字面匹配 0 条 —— 这正是要用向量检索的原因。');
+      return;
+    }
+    searchOut.innerHTML = `<div class="empty" style="margin-bottom:12px">
+      字面匹配到 ${hits.length} 条（这些是正文里原样含「${esc(q)}」的）：</div>`
+      + hits.map(h => `<div class="hit">
+          <div class="top"><span class="tag gray">${esc(h.exp_id)}</span>
+          <span class="tag gray">${esc(h.metadata.type || '')}</span></div>
+          <div>${esc(h.content)}</div>
+        </div>`).join('');
+    m.className = 'msg';
+  } catch (e) {
+    searchOut.innerHTML = '<div class="empty">出错了。</div>';
+    msg(m, e.message, false);
+  }
+}
+
+document.getElementById('btn-search').onclick = doSearch;
+document.getElementById('btn-keyword').onclick = doKeyword;
+document.getElementById('q').onkeydown = e => { if (e.key === 'Enter') doSearch(); };
+
+// ══ K1 录入 ══════════════════════════════════════════════════
+const TYPES = ['牢骚', '问题', '笔记', '解答'];
+fill(document.getElementById('e-type'), TYPES.map(t => ({ value: t, label: t })));
+
+async function loadExperiences() {
+  const box = document.getElementById('exp-list');
+  try {
+    const items = await api('/api/experience?limit=50');
+    if (!items.length) return void (box.innerHTML = '<div class="empty">还没有经验。先跑 <code>python -m scripts.seed</code> 造演示数据。</div>');
+    box.innerHTML = `<table><thead><tr><th>id</th><th>类型</th><th>正文</th><th>标签</th></tr></thead><tbody>`
+      + items.map(x => `<tr>
+          <td><span class="tag gray">${esc(x.exp_id)}</span></td>
+          <td>${esc(x.metadata.type || '')}</td>
+          <td>${esc(x.content)}</td>
+          <td>${(x.metadata.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join(' ')}</td>
+        </tr>`).join('')
+      + `</tbody></table>`;
+  } catch (e) {
+    box.innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+document.getElementById('btn-entry').onclick = async () => {
+  const m = document.getElementById('entry-msg');
+  const content = document.getElementById('e-content').value.trim();
+  if (!content) return msg(m, '正文不能空。', false);
+  const payload = {
+    content,
+    type: document.getElementById('e-type').value,
+    tags: document.getElementById('e-tags').value.split(/[,，]/).map(s => s.trim()).filter(Boolean),
+    author_id: +document.getElementById('e-author').value || null,
+    activity_id: +document.getElementById('e-activity').value || null,
+  };
+  const btn = document.getElementById('btn-entry');
+  btn.disabled = true;
+  try {
+    const r = await api('/api/experience', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    msg(m, `已录入，编号 ${r.exp_id}。去「语义检索」页搜一句话试试能不能把它召回来。`);
+    document.getElementById('e-content').value = '';
+    document.getElementById('e-tags').value = '';
+    loadExperiences();
+  } catch (e) {
+    msg(m, e.message, false);
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+// ══ K4 分工 ══════════════════════════════════════════════════
+async function loadMembers(keyword = '') {
+  const box = document.getElementById('member-list');
+  try {
+    const list = await api('/api/members?keyword=' + encodeURIComponent(keyword));
+    if (!list.length) return void (box.innerHTML = '<div class="empty">没有匹配的成员。</div>');
+    box.innerHTML = `<table><thead><tr><th>id</th><th>姓名</th><th>年级</th><th>专业</th><th>所属组</th><th>职务</th><th>状态</th><th>技能</th><th>简介</th></tr></thead><tbody>`
+      + list.map(m => `<tr>
+          <td>${m.id}</td><td>${esc(m.name)}</td><td>${esc(m.grade || '')}</td>
+          <td>${esc(m.major || '')}</td><td>${esc(m.org_unit || '')}</td>
+          <td>${esc(m.title || '')}</td><td>${esc(m.status || '')}</td>
+          <td>${(m.skills || []).map(s => `<span class="tag">${esc(s)}</span>`).join(' ')}</td>
+          <td class="meta">${esc(m.bio_short || '')}</td>
+        </tr>`).join('')
+      + `</tbody></table>
+      <p class="hint" style="margin:10px 0 0">共 ${list.length} 人。表里没有学号、手机、邮箱这些列——不是前端藏起来了，是数据库视图里就没有。</p>`;
+  } catch (e) {
+    box.innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+async function loadActivities() {
+  const box = document.getElementById('activity-list');
+  try {
+    const list = await api('/api/activities');
+    document.getElementById('activity-list').innerHTML = `<table><thead><tr><th>id</th><th>场次名</th><th>学期</th><th>日期</th><th>地点</th><th>状态</th></tr></thead><tbody>`
+      + list.map(a => `<tr>
+          <td>${a.id}</td><td>${esc(a.name)}</td><td>${esc(a.term || '')}</td>
+          <td>${esc(a.event_date || '')}</td><td>${esc(a.location || '')}</td>
+          <td><span class="tag ${a.status === '已完成' ? '' : 'gray'}">${esc(a.status || '')}</span></td>
+        </tr>`).join('')
+      + `</tbody></table>`;
+  } catch (e) {
+    box.innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+async function loadParticipations() {
+  const box = document.getElementById('part-list');
+  try {
+    const [list, members, activities] = await Promise.all([
+      api('/api/participations'),
+      api('/api/members'),
+      api('/api/activities'),
+    ]);
+    const mName = Object.fromEntries(members.map(m => [m.id, m.name]));
+    const aName = Object.fromEntries(activities.map(a => [a.id, a.name]));
+    if (!list.length) return void (box.innerHTML = '<div class="empty">还没有参与记录。</div>');
+    box.innerHTML = `<table><thead><tr><th>id</th><th>成员</th><th>活动</th><th>分工</th><th>工时</th><th>荣誉</th><th>关联经验</th><th>做了什么</th></tr></thead><tbody>`
+      + list.map(p => `<tr>
+          <td>${p.id}</td>
+          <td>${esc(mName[p.member_id] || '#' + p.member_id)}</td>
+          <td>${esc(aName[p.activity_id] || '#' + p.activity_id)}</td>
+          <td><span class="tag">${esc(p.role)}</span></td>
+          <td class="num">${p.hours ?? ''}</td>
+          <td>${p.honor ? `<span class="tag">${esc(p.honor)}</span>` : ''}</td>
+          <td>${(p.exp_ids || []).map(e => `<span class="tag gray">${esc(e)}</span>`).join(' ')}</td>
+          <td class="meta">${esc(p.contribution || '')}</td>
+        </tr>`).join('')
+      + `</tbody></table>
+      <p class="hint" style="margin:10px 0 0">共 ${list.length} 条。「关联经验」那一列就是数据库通往向量库的路。</p>`;
+  } catch (e) {
+    box.innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+document.getElementById('btn-duty').onclick = async () => {
+  const m = document.getElementById('duty-msg');
+  const member_id = +document.getElementById('p-member').value;
+  const activity_id = +document.getElementById('p-activity').value;
+  if (!member_id || !activity_id) return msg(m, '先选成员和活动。', false);
+  const hoursRaw = document.getElementById('p-hours').value;
+  const btn = document.getElementById('btn-duty');
+  btn.disabled = true;
+  try {
+    const r = await api('/api/participations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        member_id, activity_id,
+        role: document.getElementById('p-role').value,
+        contribution: document.getElementById('p-contribution').value.trim() || null,
+        hours: hoursRaw === '' ? null : parseFloat(hoursRaw),
+      }),
+    });
+    msg(m, `已登记，记录 id ${r.id}。去「报表统计」页看数字变了没。`);
+    document.getElementById('p-contribution').value = '';
+    document.getElementById('p-hours').value = '';
+    loadParticipations();
+  } catch (e) {
+    msg(m, e.message, false);
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+document.getElementById('btn-members').onclick = () =>
+  loadMembers(document.getElementById('m-keyword').value.trim());
+
+// ══ K5 报表 ══════════════════════════════════════════════════
+async function loadReports() {
+  // 谁还没参与过
+  try {
+    const list = await api('/api/reports/never-participated');
+    document.getElementById('never-out').innerHTML = list.length
+      ? list.map(m => `<span class="tag" style="margin-right:6px;font-size:13px;padding:4px 10px">${esc(m.name)}　${esc(m.grade || '')}　${esc(m.title || '')}</span>`).join('')
+        + `<p class="hint" style="margin:14px 0 0">共 ${list.length} 人一次都没排上。轮值的时候从这些人开始。</p>`
+      : '<div class="empty">所有人都参与过了。</div>';
+  } catch (e) {
+    document.getElementById('never-out').innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`;
+  }
+
+  // 按人聚合
+  try {
+    const list = await api('/api/reports/by-member');
+    document.getElementById('by-member-out').innerHTML =
+      `<table><thead><tr><th>成员</th><th>参与次数</th><th>角色分布</th><th>荣誉次数</th></tr></thead><tbody>`
+      + list.map(r => `<tr>
+          <td><a href="#" class="who" data-id="${r.member_id}" data-name="${esc(r.name)}" style="color:var(--accent)">${esc(r.name)}</a></td>
+          <td class="num">${r.total}</td>
+          <td>${Object.entries(r.roles).map(([k, v]) => `<span class="tag">${esc(k)} ${v}</span>`).join(' ') || '<span class="meta">—</span>'}</td>
+          <td class="num">${r.honors}</td>
+        </tr>`).join('')
+      + `</tbody></table>`;
+    document.querySelectorAll('a.who').forEach(a => {
+      a.onclick = ev => { ev.preventDefault(); loadHistory(a.dataset.id, a.dataset.name); };
+    });
+  } catch (e) {
+    document.getElementById('by-member-out').innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`;
+  }
+
+  // 按学期
+  try {
+    const list = await api('/api/reports/rotation');
+    document.getElementById('rotation-out').innerHTML = list.length
+      ? `<table><thead><tr><th>学期</th><th>活动场次</th><th>参与人数</th><th>参与记录数</th><th>人均场次</th></tr></thead><tbody>`
+        + list.map(r => `<tr>
+            <td>${esc(r.term)}</td><td class="num">${r.activities}</td>
+            <td class="num">${r.members}</td><td class="num">${r.records}</td>
+            <td class="num">${r.per_capita}</td>
+          </tr>`).join('')
+        + `</tbody></table>`
+      : '<div class="empty">没有数据。</div>';
+  } catch (e) {
+    document.getElementById('rotation-out').innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+async function loadHistory(memberId, name) {
+  const card = document.getElementById('history-card');
+  const box = document.getElementById('history-out');
+  card.style.display = '';
+  document.getElementById('history-who').textContent = name;
+  box.innerHTML = '<div class="empty">加载中…</div>';
+  try {
+    const list = await api(`/api/members/${memberId}/history`);
+    box.innerHTML = list.length
+      ? `<table><thead><tr><th>日期</th><th>学期</th><th>活动</th><th>系列</th><th>分工</th><th>贡献</th><th>荣誉</th><th>经验</th></tr></thead><tbody>`
+        + list.map(h => `<tr>
+            <td>${esc(h.event_date || '')}</td><td>${esc(h.term || '')}</td>
+            <td>${esc(h.activity_name)}</td><td>${esc(h.series_name || '')}</td>
+            <td><span class="tag">${esc(h.role)}</span></td>
+            <td class="meta">${esc(h.contribution || '')}</td>
+            <td>${h.honor ? `<span class="tag">${esc(h.honor)}</span>` : ''}</td>
+            <td>${(h.exp_ids || []).map(e => `<span class="tag gray">${esc(e)}</span>`).join(' ')}</td>
+          </tr>`).join('')
+        + `</tbody></table>`
+      : '<div class="empty">这个人还没有参与记录。</div>';
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) {
+    box.innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+// ══ 初始化 ══════════════════════════════════════════════════
+(async () => {
+  loadExperiences();
+  try {
+    const [members, activities] = await Promise.all([api('/api/members'), api('/api/activities')]);
+    fill(document.getElementById('e-author'), members.map(m => ({ value: m.id, label: m.name })), '（不关联）');
+    fill(document.getElementById('e-activity'), activities.map(a => ({ value: a.id, label: a.name })), '（不关联）');
+    fill(document.getElementById('p-member'), members.map(m => ({ value: m.id, label: m.name })));
+    fill(document.getElementById('p-activity'), activities.map(a => ({ value: a.id, label: a.name })));
+  } catch (e) {
+    console.warn('下拉选项加载失败，后端可能没起来：', e.message);
+  }
+  loadMembers();
+  loadActivities();
+  loadParticipations();
+  loadReports();
+})();
+</script>
+</body>
+</html>

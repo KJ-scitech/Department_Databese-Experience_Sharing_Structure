@@ -26,11 +26,21 @@
 ```
 scitech-kb/
 ├── README.md               # 本文件
+├── CONTRIBUTING.md         # 协作规范：提交红线 + PR 流程
 ├── docs/
 │   ├── 需求文档.md           # 需求（what/why）：目标、角色权限、数据模型、功能
-│   └── 交接文档.md           # 交接（how）：数据源、初始化、部署、待办
+│   ├── 交接文档.md           # 交接（how）：数据源、初始化、部署、待办
+│   └── 开发说明.md           # 开发（how to code）：怎么跑起来、代码在哪
 ├── schema/
 │   └── schema.sql          # MySQL 建表 DDL + 视图（关系模式）
+├── api/                    # FastAPI 服务（结构化库 + 向量检索）
+├── cli/                    # 命令行工具（QQ 机器人从这里读写）
+├── pipeline/               # 数据管道：从在线表格拉到 MySQL
+├── scripts/                # 运维脚本：建库 / 重置 / 造演示数据
+├── tests/                  # 验收测试（pytest）
+├── web/                    # 本地演示前端
+├── deploy/                 # 部署：systemd 单元 + 部署说明
+└── 技术栈可行性/             # 动手写代码之前的可行性验证
 ```
 
 ## 快速开始
@@ -46,6 +56,7 @@ mysql -u root -p < schema/schema.sql
 |--------|-----|
 | 需求、数据模型、字段定义、验收标准 | `docs/需求文档.md` |
 | 数据源现状、初始化步骤、部署、待办 | `docs/交接文档.md` |
+| **怎么把项目跑起来、代码放在哪、CLI 怎么用** | `docs/开发说明.md` |
 | 建表语句 | `schema/schema.sql` |
 
 ## 数据源
@@ -64,5 +75,7 @@ mysql -u root -p < schema/schema.sql
 ## 状态
 
 - 需求、schema：已完成
-- 建库、数据导入、录入工具、经验库对接：待技术组推进
+- 服务端（`api/`）、经验库语义检索、报表统计、CLI：已完成，见 `docs/开发说明.md`
+- 数据管道（`pipeline/`，从在线表格导入）：进行中
+- 部署到内网服务器：见 `deploy/部署说明.md`
 - 待确认项见 `docs/需求文档.md` 附录
