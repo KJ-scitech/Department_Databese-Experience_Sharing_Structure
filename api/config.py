@@ -54,3 +54,10 @@ EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"
 # HuggingFace 国内镜像。直连 huggingface.co 在国内基本不通，
 # 必须在导入 sentence-transformers 之前设置好这个环境变量。
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
+# 关掉 HuggingFace 的 xet 传输协议。
+# 国内下这个模型走 xet 会**卡住、或者直接失败**，报的错又跟网络没关系，极难查。
+# 关掉之后退回普通 HTTP 下载，就正常了。
+# 和上面那条一样，必须在 huggingface_hub 被导入**之前**设置——
+# 它在导入的那一刻就把这个值读成模块常量了，之后再设没有任何作用。
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
