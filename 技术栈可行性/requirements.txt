@@ -1,0 +1,23 @@
+# 知识库 · 向量检索部分依赖
+#
+# 安装（国内必须走镜像，直连 PyPI 会很慢或超时）：
+#   pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+#
+# 下面这几个是直接依赖。torch / transformers / numpy 是它们带进来的间接依赖，
+# 但版本对结果有影响，所以一并锁住——锁定版本 = 每个人跑出来结果一致。
+#
+# 实测通过的组合（2026-09-11，Python 3.11.5 / Windows 11）：
+chromadb==1.5.9
+sentence-transformers==6.0.1
+
+# 间接依赖，锁版本用（先装上面两个，这几个会自动装好）
+torch==2.14.0
+transformers==5.17.0
+numpy==2.4.6
+
+# ── 后续会用到的（现在还没装，等做到那一步再放开）────────────────
+# faster-whisper      # 音频转写（K9 相关，P1）
+# fastapi             # Web 接口层
+# uvicorn             # 跑 FastAPI 的服务器
+# SQLAlchemy          # 操作 MySQL
+# pymysql             # SQLAlchemy 连 MySQL 的驱动
