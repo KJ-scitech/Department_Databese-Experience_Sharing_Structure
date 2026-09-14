@@ -4,8 +4,9 @@
 # 逻辑：拉取 main → 与本地比较 → 有更新就 fast-forward + 必要时装依赖 + 重启服务。
 # 无更新则静默退出，不产生日志噪音。
 #
-# M710q 直连 GitHub 不通，所以 remote 默认走 gh-proxy 镜像。
-# 可用环境变量覆盖：KB_DIR / KB_BRANCH / KB_SERVICE / KB_REMOTE
+# remote 默认走 gh-proxy 镜像（因本单元以 root 跑，root 通常没配 git 代理，gh-proxy 更省事）。
+# 若已给机器配好代理，可用 KB_REMOTE=https://github.com/... 直连。
+# 环境变量：KB_DIR / KB_BRANCH / KB_SERVICE / KB_REMOTE
 set -euo pipefail
 
 APP_DIR="${KB_DIR:-$HOME/knowledge-base}"
@@ -15,6 +16,9 @@ REPO="KJ-scitech/Department_Databese-Experience_Sharing_Structure"
 REMOTE="${KB_REMOTE:-https://gh-proxy.com/https://github.com/$REPO.git}"
 
 LOG() { echo "[$(date '+%F %T')] $*"; }
+
+# root 身份跑时，git 会把非 root 属主的仓库判为 dubious ownership，先声明为安全目录
+git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
 
 cd "$APP_DIR" || { LOG "错误：找不到目录 $APP_DIR"; exit 1; }
 
@@ -51,11 +55,7 @@ if ! git diff --quiet "$CUR" "$NEW" -- requirements.txt; then
   fi
 fi
 
-# 重启服务（用户级或系统级）
-if systemctl --user list-unit-files 2>/dev/null | grep -q "^${SERVICE}\."; then
-  systemctl --user restart "$SERVICE"
-else
-  systemctl restart "$SERVICE"
-fi
+# 重启服务（本单元以 root 运行，直接操作系统级单元）
+systemctl restart "$SERVICE"
 
 LOG "部署完成：${NEW:0:8}"

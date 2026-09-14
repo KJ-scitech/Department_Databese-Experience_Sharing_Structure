@@ -63,10 +63,11 @@
 | `deploy/auto-deploy.timer` | 每 5 分钟触发一次 |
 
 脚本要点：
-- remote 默认走 `https://gh-proxy.com/https://github.com/...`，因为服务器直连 GitHub 不通。
+- remote 默认走 `https://gh-proxy.com/https://github.com/...`（root 身份一般没配 git 代理，gh-proxy 更省事）；已配代理的机器可用 `KB_REMOTE` 直连。
 - 只有 commit 变化时才动作；无变化静默退出。
 - 工作区有未提交改动时**跳过**部署，避免覆盖。
 - 只有 `requirements.txt` 变了才重装依赖。
+- 单元以 **root** 运行（脚本最后要 `systemctl restart` 系统级服务，普通用户没权限）；脚本内已用 `git config --global --add safe.directory` 处理 root 的 dubious ownership 报错。
 
 ### 3.1 安装（服务器上，管理员或对应用户）
 
@@ -123,6 +124,7 @@ bash <(curl -sL https://gh-proxy.com/https://raw.githubusercontent.com/KJ-scitec
 | 部署后报权限错 | 脚本改动工作区文件权限 | 确保 `knowledge-base` 目录归运行用户所有 |
 | timer 装了不跑 | 没 `daemon-reload` / 没 enable | `sudo systemctl daemon-reload && sudo systemctl enable --now auto-deploy.timer` |
 | 想立即部署不用等 | 轮询周期 5 分钟 | `sudo systemctl start auto-deploy.service` |
+| git 报 `dubious ownership` | root 跑了非 root 属主的仓库 | 脚本已加 `safe.directory`；或手动 `git config --global --add safe.directory <目录>` |
 
 ---
 

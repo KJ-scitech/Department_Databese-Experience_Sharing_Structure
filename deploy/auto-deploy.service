@@ -5,8 +5,12 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-# 按实际情况修改：跑部署的账号与目录
-User=ubuntu
+# 用 root 跑：脚本最后要 restart 系统级服务 scitech-kb，
+# 普通用户没这个权限。若改成普通用户，需另配 polkit/sudo 规则。
+# 注意：root 跑 git 会因目录属主不是 root 而报 "dubious ownership"，
+# auto-deploy.sh 里已用 safe.directory 处理。
+User=root
 WorkingDirectory=/home/ubuntu/knowledge-base
 Environment=KB_SERVICE=scitech-kb
+Environment=KB_DIR=/home/ubuntu/knowledge-base
 ExecStart=/home/ubuntu/knowledge-base/deploy/auto-deploy.sh
