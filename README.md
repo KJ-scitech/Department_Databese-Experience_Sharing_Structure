@@ -30,16 +30,18 @@ scitech-kb/
 ├── docs/
 │   ├── 需求文档.md           # 需求（what/why）：目标、角色权限、数据模型、功能
 │   ├── 交接文档.md           # 交接（how）：数据源、初始化、部署、待办
-│   └── 开发说明.md           # 开发（how to code）：怎么跑起来、代码在哪
+│   ├── 开发说明.md           # 开发（how to code）：怎么跑起来、代码在哪
+│   └── CI-CD说明.md          # 持续集成/部署：Actions 测试 + 服务器自动部署
 ├── schema/
 │   └── schema.sql          # MySQL 建表 DDL + 视图（关系模式）
+├── .github/workflows/ci.yml # CI：push/PR 自动跑 pytest
 ├── api/                    # FastAPI 服务（结构化库 + 向量检索）
 ├── cli/                    # 命令行工具（QQ 机器人从这里读写）
 ├── pipeline/               # 数据管道：从在线表格拉到 MySQL
 ├── scripts/                # 运维脚本：建库 / 重置 / 造演示数据
 ├── tests/                  # 验收测试（pytest）
 ├── web/                    # 本地演示前端
-├── deploy/                 # 部署：systemd 单元 + 部署说明
+├── deploy/                 # 部署：systemd 单元 + 部署说明 + 自动部署（bootstrap / auto-deploy）
 └── 技术栈可行性/             # 动手写代码之前的可行性验证
 ```
 
@@ -57,6 +59,7 @@ mysql -u root -p < schema/schema.sql
 | 需求、数据模型、字段定义、验收标准 | `docs/需求文档.md` |
 | 数据源现状、初始化步骤、部署、待办 | `docs/交接文档.md` |
 | **怎么把项目跑起来、代码放在哪、CLI 怎么用** | `docs/开发说明.md` |
+| **CI/CD：自动测试与自动部署** | `docs/CI-CD说明.md` |
 | 建表语句 | `schema/schema.sql` |
 
 ## 数据源
@@ -78,5 +81,6 @@ mysql -u root -p < schema/schema.sql
 - 服务端（`api/`）、经验库语义检索、报表统计、CLI：已完成，见 `docs/开发说明.md`
 - 数据管道（`pipeline/`，从在线表格导入）：**代码已完成，暂不启用**——缺一份在线表格的真实表头，拿到就能跑
 - 部署到内网服务器：见 `deploy/部署说明.md`
+- **CI/CD：GitHub Actions 自动测试 + 服务器定时自动部署**，见 `docs/CI-CD说明.md`
 - **CAS 统一身份认证：一期不做，列为后续计划**，见 `docs/开发说明.md` 待定事项
 - 待确认项见 `docs/需求文档.md` 附录

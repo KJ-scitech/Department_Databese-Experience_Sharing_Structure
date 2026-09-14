@@ -1,0 +1,11 @@
+[Unit]
+Description=定时检查知识库代码更新（CD）
+
+[Timer]
+# 开机 2 分钟后首次检查，之后每 5 分钟一次
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=知识库自动部署（拉取 main 并重启服务）
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# 按实际情况修改：跑部署的账号与目录
+User=ubuntu
+WorkingDirectory=/home/ubuntu/knowledge-base
+Environment=KB_SERVICE=scitech-kb
+ExecStart=/home/ubuntu/knowledge-base/deploy/auto-deploy.sh
