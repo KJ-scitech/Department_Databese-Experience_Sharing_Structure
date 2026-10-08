@@ -1,6 +1,6 @@
 """向量库：Chroma（落盘）+ sentence-transformers（生成向量）。
 
-═══ 三个坑在这里落地 ═══
+═══ 四个坑在这里落地 ═══
 这些都是实测踩出来的，不是抄来的。改代码时别把它们改回去。
 
 坑 1 · 距离空间必须是 cosine
@@ -36,10 +36,14 @@ from . import config  # noqa: I001 —— 顺序是功能性的，不要合并�
 import chromadb
 from sentence_transformers import SentenceTransformer
 
-# 模块级缓存：模型和集合都只初始化一次。
+# ── 模块级缓存与锁 ─────────────────────────────────────────────
 # 模型加载要 15–30 秒，每次请求都加载的话服务就没法用了。
+# 模型和集合都用「双重检查锁」初始化：路由是同步函数，FastAPI 把它们丢进
+# 线程池跑——裸的 `if _model is None` 在冷启动时可能被两个线程同时穿过，
+# 各自加载一份模型（白吃 30 秒 + 双倍内存），Chroma 集合同理。
 _model: SentenceTransformer | None = None
 _collection: Any = None
+_init_lock = threading.Lock()
 
 # 发号用的锁和计数器，见 next_id() 的说明。
 _id_lock = threading.Lock()
@@ -50,7 +54,9 @@ def get_model() -> SentenceTransformer:
     """加载 embedding 模型（首次调用会下载，之后走本地缓存）。"""
     global _model
     if _model is None:
-        _model = SentenceTransformer(config.EMBEDDING_MODEL)
+        with _init_lock:
+            if _model is None:  # 双重检查：等锁期间可能已被别的线程加载好
+                _model = SentenceTransformer(config.EMBEDDING_MODEL)
     return _model
 
 
@@ -58,16 +64,18 @@ def get_collection():
     """拿到 Chroma 集合（落盘，重启不丢）。"""
     global _collection
     if _collection is None:
-        config.CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+        with _init_lock:
+            if _collection is None:
+                config.CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 
-        # 用 PersistentClient 而不是 Client：
-        # Client 是内存模式，进程一结束数据就没了——那是脚本的用法，不是服务的。
-        client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
+                # 用 PersistentClient 而不是 Client：
+                # Client 是内存模式，进程一结束数据就没了——那是脚本的用法，不是服务的。
+                client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
 
-        _collection = client.get_or_create_collection(
-            name=config.COLLECTION_NAME,          # 坑 3：ASCII 名
-            metadata={"hnsw:space": "cosine"},    # 坑 1：显式指定余弦空间
-        )
+                _collection = client.get_or_create_collection(
+                    name=config.COLLECTION_NAME,          # 坑 3：ASCII 名
+                    metadata={"hnsw:space": "cosine"},    # 坑 1：显式指定余弦空间
+                )
     return _collection
 
 
@@ -91,7 +99,10 @@ def encode(texts: list[str]) -> list[list[float]]:
 # ── 写 ────────────────────────────────────────────────────────
 
 def add(exp_id: str, content: str, metadata: dict) -> None:
-    """新增一条经验：正文进 documents，元信息进 metadata。"""
+    """新增一条经验：正文进 documents，元信息进 metadata。
+
+    id 已存在时 Chroma 会抛 ValueError → 路由层转 409/500。
+    """
     collection = get_collection()
     collection.add(
         ids=[exp_id],
@@ -101,8 +112,39 @@ def add(exp_id: str, content: str, metadata: dict) -> None:
     )
 
 
-def update(exp_id: str, content: str, metadata: dict) -> None:
+def add_batch(items: list[dict]) -> int:
+    """批量新增（seed / 导数据用），返回写入条数。
+
+    逐条调 add() 的话，每条都要过一次模型——虽然模型已缓存，
+    但 encode 的分词、推理开销乘以条数还是很可观；批量一次 encode
+    能快一个数量级。空列表直接返回 0，Chroma 不接受空写入。
+
+    每项形如 {"exp_id": ..., "content": ..., "metadata": {...}}。
+    """
+    if not items:
+        return 0
     collection = get_collection()
+    collection.add(
+        ids=[item["exp_id"] for item in items],
+        documents=[item["content"] for item in items],
+        embeddings=encode([item["content"] for item in items]),
+        metadatas=[_clean_metadata(item.get("metadata") or {}) for item in items],
+    )
+    return len(items)
+
+
+def update(exp_id: str, content: str, metadata: dict) -> None:
+    """修改一条经验（K8 补标签要走这里）。
+
+    ⚠️ Chroma 的 update 对**不存在的 id 是静默无操作**，不报错。
+    路由层拿它做 PATCH 时，会把「改成功」返回给一个根本不存在的条目。
+    所以这里先查一次存在性，不存在就抛 KeyError → 路由转 404。
+
+    （多一次 get 有点浪费，但 update 是低频操作，正确性优先。）
+    """
+    collection = get_collection()
+    if not collection.get(ids=[exp_id])["ids"]:
+        raise KeyError(f"经验不存在: {exp_id}")
     collection.update(
         ids=[exp_id],
         documents=[content],
@@ -111,7 +153,30 @@ def update(exp_id: str, content: str, metadata: dict) -> None:
     )
 
 
+def update_tags(exp_id: str, tags: list[str]) -> dict:
+    """只改标签、不动正文（K8 的 PATCH /api/experience/{exp_id} 用）。
+
+    为什么单独给这个函数：PATCH 契约只开放 tags 字段。如果路由为了改个标签
+    把整条记录读出来再原样写回，中间任何一个字段被并发改动都会被悄悄覆盖回去。
+    这里用 Chroma update 只传 metadatas——**不传 documents/embeddings 时
+    Chroma 不会重算向量**，正文零风险，也省一次模型推理。
+
+    返回更新后的完整条目，路由直接拿去拼 ExperienceOut。
+    """
+    collection = get_collection()
+    result = collection.get(ids=[exp_id])
+    if not result["ids"]:
+        raise KeyError(f"经验不存在: {exp_id}")
+    collection.update(ids=[exp_id], metadatas=[_clean_metadata({"tags": tags})])
+    return {
+        "exp_id": exp_id,
+        "content": result["documents"][0],
+        "metadata": dict(collection.get(ids=[exp_id])["metadatas"][0] or {}),
+    }
+
+
 def delete(exp_id: str) -> None:
+    """删除一条经验。id 不存在时 Chroma 静默成功——语义上「删没了」也算删成。"""
     get_collection().delete(ids=[exp_id])
 
 
@@ -125,8 +190,12 @@ def search(query: str, top_k: int = 5) -> list[dict]:
     和我们入库用的 bge-small-zh（512 维）不是一个模型，维度对不上直接报错；
     就算维度碰巧一样，语义空间也不是同一个，结果没有意义。
     """
+    if top_k < 1:
+        return []
+
     collection = get_collection()
-    if collection.count() == 0:
+    total = collection.count()  # 只查一次，下面两处都要用
+    if total == 0:
         return []
 
     # 坑 2：这里不加 instruction 前缀，和入库时的写法保持一致。
@@ -134,7 +203,7 @@ def search(query: str, top_k: int = 5) -> list[dict]:
 
     result = collection.query(
         query_embeddings=[query_vector],
-        n_results=min(top_k, collection.count()),
+        n_results=min(top_k, total),
     )
 
     items = []
@@ -165,7 +234,13 @@ def keyword_search(term: str, limit: int = 5) -> list[dict]:
     这里用 Chroma 的字面过滤（相当于 SQL 的 LIKE %term%），
     问「设备出故障了咋办」时它一条都找不到，
     而「投影仪不亮」那条明明就在库里——差距一眼可见。
+
+    两个特性要知道：
+    - 大小写敏感（Chroma 的 $contains 是精确子串匹配）；
+    - 空字符串会匹配到所有条目（等于不限条件），所以空词直接返回空列表。
     """
+    if not term:
+        return []
     result = get_collection().get(where_document={"$contains": term}, limit=limit)
     return [
         {"exp_id": i, "content": d, "metadata": dict(m or {})}
@@ -186,8 +261,12 @@ def get(exp_id: str) -> dict | None:
 
 
 def list_all(limit: int = 100, offset: int = 0) -> list[dict]:
-    """列出经验（Chroma 没有分页，这里取全量后切片）。"""
-    result = get_collection().get()
+    """列出经验（Chroma 没有分页，这里取全量后切片）。
+
+    include 只取 documents 和 metadatas——默认还会带 embeddings（每条 512 个
+    float），几百条经验就是几十 MB 的无用拷贝，纯粹浪费内存和时间。
+    """
+    result = get_collection().get(include=["documents", "metadatas"])
     items = [
         {
             "exp_id": i,
@@ -225,11 +304,14 @@ def next_id() -> str:
        注：这只防**同一个进程内**的并发。跨进程同时开两个 Chroma
        PersistentClient 本来就不受支持（见 cli/client.py 开头的说明），
        架构上已经规定了服务是唯一写向量库的进程。
+
+    性能说明：扫描用的是 get(include=[])，只要 id、不拉正文和 metadata。
+    库到几百条时，全量拉 documents 是纯浪费——这个函数每次录入都要跑。
     """
     global _id_counter
     with _id_lock:
         used = 0
-        for i in get_collection().get()["ids"]:
+        for i in get_collection().get(include=[])["ids"]:
             try:
                 used = max(used, int(i.split("-")[1]))
             except (IndexError, ValueError):
@@ -239,18 +321,23 @@ def next_id() -> str:
 
 
 def clear() -> None:
-    """清空集合（seed 重建时用）。"""
+    """清空集合（seed 重建时用）。
+
+    只该在服务启动前（scripts/seed）调用。运行中的请求如果握着旧集合对象，
+    删除集合后它们会拿到 Chroma 的内部错误——这是 seed 的语义，不是服务的。
+    """
     global _collection, _id_counter
-    client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
-    try:
-        client.delete_collection(config.COLLECTION_NAME)
-    except Exception:
-        pass
-    _collection = None
-    # 集合没了，号也得从头开始，否则 seed 造出来的第一条会是 exp-9 而不是 exp-1。
-    # （不清零也不会重复发号，只是编号不好看——但没必要留着这个意外。）
-    with _id_lock:
-        _id_counter = 0
+    with _init_lock:
+        client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
+        try:
+            client.delete_collection(config.COLLECTION_NAME)
+        except Exception:
+            pass
+        _collection = None
+        # 集合没了，号也得从头开始，否则 seed 造出来的第一条会是 exp-9 而不是 exp-1。
+        # （不清零也不会重复发号，只是编号不好看——但没必要留着这个意外。）
+        with _id_lock:
+            _id_counter = 0
 
 
 def _clean_metadata(metadata: dict) -> dict:
