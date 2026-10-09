@@ -48,6 +48,21 @@ participation 的唯一键是 (activity_id, member_id, role)：
 CLI 不自己先去查一遍「是不是已经登记过了」，那样反而更糟：
 查一次再写一次，中间又多一个竞态窗口，而且判重规则就抄了第二份。
 让数据库的唯一键去判，是唯一可靠的做法。
+
+═══════════════════════════════════════════════════════════════════
+  这次补的子命令
+═══════════════════════════════════════════════════════════════════
+
+服务端补上了「改」和「删」，CLI 这一侧补了机器人真正用得到的那几个：
+
+  member archive   归档成员（软删除：人从名单消失，参与记录保留）
+  series add       新增系列
+  activity add     新增场次
+  part delete      删一条登记错的参与记录
+
+**没补的是「改」**（member update / part update）：那是网页和 K6 录数据的路径，
+机器人不需要；而且要动 PATCH，得先给共享的 cli/client.py 加一个 `patch()` 方法
+（它现在只有 get/post/delete），那不属于本文件。
 """
 from . import client
 
@@ -81,12 +96,27 @@ def _register_member(sub, parents) -> None:
     p.add_argument("member_id", type=int, help="member.id")
     p.set_defaults(run=run_member_history)
 
+    p = actions.add_parser(
+        "archive",
+        parents=parents,
+        help="归档成员（软删除）：人从名单里消失，但参与记录一条都不会少",
+    )
+    p.add_argument("member_id", type=int, help="member.id")
+    p.set_defaults(run=run_member_archive)
+
 
 def _register_series(sub, parents) -> None:
     parser = sub.add_parser("series", help="活动系列（品牌/栏目，如「惟学沙龙」）")
     actions = parser.add_subparsers(dest="action", metavar="动作", required=True)
     p = actions.add_parser("list", parents=parents, help="系列列表")
     p.set_defaults(run=run_series_list)
+
+    p = actions.add_parser("add", parents=parents, help="新增一个系列")
+    p.add_argument("--name", required=True, help="系列名，如「惟学沙龙」（不能重名）")
+    p.add_argument("--category", help="类别：学业支持/科研启蒙/讲座课堂/…")
+    p.add_argument("--description", help="系列定位")
+    p.add_argument("--official", action="store_true", help="标记为官方活动")
+    p.set_defaults(run=run_series_add)
 
 
 def _register_activity(sub, parents) -> None:
@@ -99,6 +129,16 @@ def _register_activity(sub, parents) -> None:
         help="把「取消」的场次也列出来（默认不列，因为统计时不该算进去）",
     )
     p.set_defaults(run=run_activity_list)
+
+    p = actions.add_parser("add", parents=parents, help="新增一场活动")
+    p.add_argument("--name", required=True, help="场次名，如「惟学沙龙第 3 期」")
+    p.add_argument("--series-id", type=int, help="属于哪个系列（series list 里查）")
+    p.add_argument("--term", help="学年/学期，如 2025-2026-1")
+    p.add_argument("--event-date", help="日期 YYYY-MM-DD")
+    p.add_argument("--location", help="地点")
+    p.add_argument("--status", help="计划/进行中/已完成/取消（默认 计划）")
+    p.add_argument("--description", help="活动说明")
+    p.set_defaults(run=run_activity_add)
 
 
 def _register_participation(sub, parents) -> None:
@@ -131,6 +171,10 @@ def _register_participation(sub, parents) -> None:
     # ★ 这里有意没有 --honor，原因见文件开头。
     p.set_defaults(run=run_part_add)
 
+    p = actions.add_parser("delete", parents=parents, help="删一条登记错的参与记录")
+    p.add_argument("participation_id", type=int, help="participation.id（part list 里查）")
+    p.set_defaults(run=run_part_delete)
+
 
 # ══ 各动作的实现 ═════════════════════════════════════════════
 
@@ -149,14 +193,54 @@ def run_member_history(args, api: client.Client) -> client.Result:
     return client.Result(data=history, message=f"共 {len(history)} 条履历")
 
 
+def run_member_archive(args, api: client.Client) -> client.Result:
+    """归档成员。
+
+    服务端做的是软删除（只打 deleted_at），所以这里写完不会丢历史：
+    这个人的参与记录、履历都还在，只是不再出现在名单里。
+    """
+    result = api.delete(f"/api/members/{args.member_id}")
+    return client.Result(
+        data=result,
+        message=f"已归档成员 {args.member_id}（参与记录保留）",
+    )
+
+
 def run_series_list(args, api: client.Client) -> client.Result:
     series = api.get("/api/series")
     return client.Result(data=series, message=f"共 {len(series)} 个系列")
 
 
+def run_series_add(args, api: client.Client) -> client.Result:
+    body = {"name": args.name, "is_official": args.official}
+    if args.category:
+        body["category"] = args.category
+    if args.description:
+        body["description"] = args.description
+    created = api.post("/api/series", body)
+    return client.Result(data=created, message=f"已新增系列「{args.name}」")
+
+
 def run_activity_list(args, api: client.Client) -> client.Result:
     activities = api.get("/api/activities", include_cancelled=args.include_cancelled)
     return client.Result(data=activities, message=f"共 {len(activities)} 场活动")
+
+
+def run_activity_add(args, api: client.Client) -> client.Result:
+    body = {"name": args.name}
+    for key, value in (
+        ("series_id", args.series_id),
+        ("term", args.term),
+        ("event_date", args.event_date),
+        ("location", args.location),
+        ("status", args.status),
+        ("description", args.description),
+    ):
+        # 没给的字段一个都不发：服务端的默认值（status=计划）才有机会生效
+        if value is not None:
+            body[key] = value
+    created = api.post("/api/activities", body)
+    return client.Result(data=created, message=f"已新增活动「{args.name}」")
 
 
 def run_part_list(args, api: client.Client) -> client.Result:
@@ -185,4 +269,12 @@ def run_part_add(args, api: client.Client) -> client.Result:
     return client.Result(
         data=created,
         message=f"已登记：成员 {args.member_id} 在活动 {args.activity_id} 担任「{args.role}」",
+    )
+
+
+def run_part_delete(args, api: client.Client) -> client.Result:
+    result = api.delete(f"/api/participations/{args.participation_id}")
+    return client.Result(
+        data=result,
+        message=f"已删除参与记录 {args.participation_id}",
     )
