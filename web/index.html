@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>学创部知识库</title>
 <!-- 空图标：不写这行浏览器会去要 /favicon.ico，拿不到就在控制台留一条红色
-     404。那条红字跟本项目无关，但组员一打开开发者工具就会看到，
+     404。那条红字跟本项目无关，但部员一打开开发者工具就会看到，
      容易当成真出了错。一个内联空图标消掉它，省得每次都要解释。 -->
 <link rel="icon" href="data:,">
 <style>
-  /* 只用一个文件写完整套样式，方便直接丢给组员看，不用装任何前端工具链。
+  /* 只用一个文件写完整套样式，方便直接丢给部员看，不用装任何前端工具链。
      维护这条规矩的代价是文件长；收益是「双击就能打开」——
      对一个部员轮换、没人配环境的项目，这个收益比文件短重要。 */
   :root {
@@ -361,7 +361,7 @@
             <div class="field"><label>入部学期</label><input id="nm-term" style="width:100%" placeholder="2026-2027"></div>
             <div class="field"><label>状态</label><select id="nm-status" style="width:100%"></select></div>
             <div class="field"><label>所属组</label><input id="nm-org" style="width:100%" placeholder="知识库组"></div>
-            <div class="field"><label>职务</label><input id="nm-title" style="width:100%" placeholder="组员"></div>
+            <div class="field"><label>职务</label><input id="nm-title" style="width:100%" placeholder="部员"></div>
             <div class="field"><label>技能（逗号分隔）</label><input id="nm-skills" style="width:100%" placeholder="Python, SQL"></div>
           </div>
           <div class="field" style="margin-bottom:10px">
@@ -526,6 +526,20 @@ async function loadMeta() {
   warn.textContent = '取不到 /api/meta（后端可能是旧版本），下拉框用的是页面内置的默认值。'
     + '新增的类型/角色可能不在列表里，但提交仍然有效——服务端只校验经验的类型。';
   return false;
+}
+
+// 职务的排序权重：越小越靠前；不在表里的（空、"指导老师"这类）排最后。
+// 顺序取自 /api/meta 的 title_order，页面上不再硬写一份。
+function titleRank(title) {
+  const order = META.title_order || [];
+  const i = order.indexOf(title || '');
+  return i === -1 ? order.length : i;
+}
+
+// 成员排序：先按职务，同职务按姓名。
+function byTitleThenName(a, b) {
+  return titleRank(a.title) - titleRank(b.title)
+    || (a.name || '').localeCompare(b.name || '', 'zh');
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1008,6 +1022,9 @@ async function loadMembers(keyword = '') {
   const box = document.getElementById('member-list');
   try {
     const list = await api('/api/members?keyword=' + encodeURIComponent(keyword));
+    // ★ 排序在前端做：/api/members 那个接口归 PR #5 管（那个文件不归我们改），
+    //   而"职务高的排前面"是展示规则，放这儿不会跟别人的改动打架。
+    list.sort(byTitleThenName);
     if (!list.length) {
       box.innerHTML = '<div class="empty">没有匹配的成员。'
         + (keyword ? '换个词试试，或点上面的「查询」看全部。' : '用上面的「新增成员」加一个。')
@@ -1404,6 +1421,8 @@ async function refreshRefs() {
       api('/api/activities'),
       api('/api/series'),
     ]);
+    // 下拉框里也按职务排：选人的时候主席、部长排在最前面
+    members.sort(byTitleThenName);
     fill(document.getElementById('e-author'), members.map(m => ({ value: m.id, label: m.name })), '（不关联）');
     fill(document.getElementById('e-activity'), activities.map(a => ({ value: a.id, label: a.name })), '（不关联）');
     fill(document.getElementById('p-member'), members.map(m => ({ value: m.id, label: m.name })));

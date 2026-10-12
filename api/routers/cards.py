@@ -25,7 +25,7 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import db, models
+from .. import db, models, schemas
 
 router = APIRouter(prefix="/api/cards", tags=["介绍卡 K6"])
 
@@ -258,6 +258,11 @@ def list_member_cards(session: Session = Depends(db.get_db)):
         .where(models.MemberPublic.status == "在部")
         .order_by(models.MemberPublic.id)
     ).all()
+
+    # 展示顺序：职务高的在前（主席 → 部长 → 副部长 → 组长 → 部员），同职务按姓名。
+    # 在 Python 里排而不是写进 SQL：顺序是**展示规则**，跟数据库无关；
+    # 而且这样和前端、报表用的是同一个 schemas.title_rank，不会各排各的。
+    members = sorted(members, key=lambda m: (schemas.title_rank(m.title), m.name or ""))
 
     history_by_member: dict[int, list[dict]] = {}
     for row in _history_of(session):

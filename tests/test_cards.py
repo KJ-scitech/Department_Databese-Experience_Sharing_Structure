@@ -39,7 +39,7 @@ def test_member_card_text_renders_every_filled_field():
             "grade": "2025级",
             "major": "软件工程",
             "org_unit": "知识库组",
-            "title": "组员",
+            "title": "部员",
             "status": "在部",
             "join_term": "2025-2026",
             "skills": ["Python"],
@@ -60,7 +60,7 @@ def test_member_card_text_renders_every_filled_field():
 
     assert "【某人】" in text
     assert "2025级 · 软件工程" in text
-    assert "知识库组 · 组员" in text
+    assert "知识库组 · 部员" in text
     assert "状态：在部 · 2025-2026 入部" in text
     assert "技能：Python" in text
     assert "荣誉：优秀部员" in text
@@ -255,3 +255,17 @@ def test_single_activity_card_matches_the_list(seeded):
 def test_missing_cards_return_404(seeded):
     assert seeded.get("/api/cards/members/999999").status_code == 404
     assert seeded.get("/api/cards/activities/999999").status_code == 404
+
+
+def test_介绍卡按职务排序(seeded):
+    """介绍卡：职务高的在前，同职务按姓名。
+
+    只断言权重单调不减，不写死具体是谁——CI 跑的是种子数据，
+    里面没有主席/部长，写死名字会让这条测试变成「数据一变就红」。
+    """
+    from api import schemas
+
+    cards = seeded.get("/api/cards/members").json()
+    ranks = [schemas.title_rank(c["fields"].get("title")) for c in cards]
+
+    assert ranks == sorted(ranks), "介绍卡没按职务排序"

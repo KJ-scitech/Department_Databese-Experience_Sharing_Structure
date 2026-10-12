@@ -7,7 +7,7 @@
    这里只做「谁干了几次、干了什么角色」的统计。
 """
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select, text
+from sqlalchemy import case, func, select, text
 from sqlalchemy.orm import Session
 
 from .. import db, models, schemas
@@ -26,6 +26,16 @@ def report_by_member(
     次数显示 0。用 INNER JOIN 的话这些人会直接从报表里消失，
     而「谁还没干过」恰恰是轮值时最需要看到的信息。
     """
+    # 排序：先按职务（主席 → 部长 → 副部长 → 组长 → 部员），同一职务里次数多的在前。
+    # ★ 为什么不靠"把某人的次数改大"来把他顶到最前面：这张表是**工作量报表**，
+    #   数字要真——它要用来安排轮值、看谁还没干过（见文件头"不做时长发放"那段）。
+    #   里面塞一个人为的极大值，这张表就废了；排在最后只是不好看，数不真才是真问题。
+    #   排不上号的职务给一个大值，落在最后，不会丢人。
+    title_rank_case = case(
+        {t: i for i, t in enumerate(schemas.TITLE_ORDER)},
+        value=models.Member.title,
+        else_=len(schemas.TITLE_ORDER),
+    )
     stmt = (
         select(
             models.Member.id,
@@ -34,8 +44,8 @@ def report_by_member(
         )
         .join(models.Participation, models.Participation.member_id == models.Member.id, isouter=True)
         .where(models.Member.deleted_at.is_(None))
-        .group_by(models.Member.id, models.Member.name)
-        .order_by(text("total DESC"), models.Member.id)
+        .group_by(models.Member.id, models.Member.name, title_rank_case)
+        .order_by(title_rank_case, text("total DESC"), models.Member.id)
     )
     if only_active:
         stmt = stmt.where(models.Member.status == "在部")
