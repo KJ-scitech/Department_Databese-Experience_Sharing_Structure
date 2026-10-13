@@ -71,6 +71,7 @@ python -m uvicorn api.main:app --port 8000
 | 需求、数据模型、字段定义、验收标准 | `docs/需求文档.md` |
 | 数据源现状、初始化步骤、部署、待办 | `docs/交接文档.md` |
 | **怎么把项目跑起来、代码放在哪、CLI 怎么用** | `docs/开发说明.md` |
+| **QQ 机器人怎么对接（命令行约定、退出码、字段红线）** | `docs/对接说明.md` |
 | **CI/CD：自动测试与自动部署** | `docs/CI-CD说明.md` |
 | 建表语句 | `schema/schema.sql` |
 
