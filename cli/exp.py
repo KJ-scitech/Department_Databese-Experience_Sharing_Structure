@@ -54,9 +54,18 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from tagging import rules
+try:
+    from tagging import rules
+except ImportError:  # pragma: no cover —— 只有 tagging/ 还没到位时才会走到
+    rules = None  # type: ignore[assignment]
 
 from . import client
+
+# tagging/ 是 K8 那块（本仓库里最新的一块，别的人在写）。它要是还没合进来，
+# 「查经验 / 录经验」这两条机器人天天要用的命令不能跟着一起挂掉——
+# 所以导入失败不在模块顶层炸，等真正要跑打标的时候再明确报错（见 _load_rules）。
+# 这里只是给 --tagger 一个兜底的候选项；真跑的时候还要再确认一次零件在不在。
+TAGGER_NAMES: tuple[str, ...] = tuple(getattr(rules, "TAGGER_NAMES", None) or ("rules",))
 
 # 和服务端 api/schemas.py 的 EXPERIENCE_TYPES 保持一致。
 #
@@ -111,6 +120,12 @@ def register(sub, parents) -> None:
     p = actions.add_parser("list", parents=parents, help="分页列出经验")
     p.add_argument("--limit", type=int, default=50, help="每页几条，默认 50（上限 200）")
     p.add_argument("--offset", type=int, default=0, help="跳过前几条，默认 0")
+    # 三个筛选参数和服务端 GET /api/experience 的那三个一一对应，
+    # 不传就是全量。挑经验出来核对的活（打标前后点数、查某个人的录入）
+    # 靠它们，不用把整库拉下来自己过滤。
+    p.add_argument("--type", choices=EXPERIENCE_TYPES, help="只看某一类，如 笔记")
+    p.add_argument("--tag", help="只看带这个标签的经验")
+    p.add_argument("--author-id", type=int, help="只看这个人署名的经验（member.id）")
     p.set_defaults(run=run_list)
 
     p = actions.add_parser(
@@ -134,6 +149,12 @@ def register(sub, parents) -> None:
     )
     p.add_argument("--activity-id", type=int, help="关联某场活动 activity.id")
     p.add_argument(
+        "--participation-id",
+        type=int,
+        help="关联一条参与记录 participation.id。★ 填了之后服务端会把新经验 id "
+             "追加进那条记录的 exp_ids —— 报表和个人履历就是靠这个找经验的",
+    )
+    p.add_argument(
         "--source",
         help="来源。机器人不署名时用它记群名，如「2026开甲学创部」",
     )
@@ -150,7 +171,7 @@ def register(sub, parents) -> None:
     )
     p.add_argument(
         "--tagger",
-        choices=rules.TAGGER_NAMES,
+        choices=TAGGER_NAMES,
         default="rules",
         help="打标器，默认 rules。llm 还没实现，给了会明确报错退出",
     )
@@ -160,12 +181,22 @@ def register(sub, parents) -> None:
         action="store_true",
         help="只列出来要打什么标签，一个写请求都不发（第一次跑建议先加这个）",
     )
+    p.add_argument(
+        "--verify",
+        action="store_true",
+        help="写完之后照原样再扫一遍，确认没有漏补的（幂等自检：第二遍应当一条都不用补）",
+    )
     p.set_defaults(run=run_tag)
 
 
 # ══ 各动作的实现 ═════════════════════════════════════════════
 
 def run_search(args, api: client.Client) -> client.Result:
+    # 范围检查放在发请求之前：服务端也有（Query(ge=..., le=...)），
+    # 但那样绕一圈回来的是英文 Pydantic 校验词，机器人看不懂该改什么。
+    _require_range("--top-k", args.top_k, 1, 20)
+    _require_range("--min-similarity", args.min_similarity, 0.0, 1.0)
+
     hits = api.get(
         "/api/experience/search",
         q=args.q,
@@ -178,7 +209,10 @@ def run_search(args, api: client.Client) -> client.Result:
         # 注意：这里**不是**错误，退出码仍然是 0。
         # 「没找到」是一个正常答案，机器人应该说「没找到相关经验」，
         # 而不是报错——所以靠 code 区分，不靠退出码。
-        best = hits[0]["similarity"] if hits else None
+        # 取最大的那个而不是 hits[0]：服务端现在按距离升序返回（最近的在前），
+        # 但「最像的一条」这个说法依赖的是排序约定，不是接口承诺。
+        # max 一行的事，就不用跟着别人的排序实现走了。
+        best = max(h["similarity"] for h in hits) if hits else None
         return client.Result(
             data=[],
             code="no_match",
@@ -187,7 +221,11 @@ def run_search(args, api: client.Client) -> client.Result:
                 if best is not None
                 else "经验库还是空的"
             ),
-            low_confidence=True,
+            # ★ 这一档是「一条都不给」，不是「给了但不太准」——
+            # low_confidence 的语义只属于下面第 ② 档（见文件开头）。
+            # 这里给 true 的话，只看这个标志位的机器人会对着空结果说
+            # 「有一条可能相关的」，正好说反。机器人该认的是 code="no_match"。
+            low_confidence=False,
         )
 
     best = kept[0]["similarity"]
@@ -211,7 +249,18 @@ def run_get(args, api: client.Client) -> client.Result:
 
 
 def run_list(args, api: client.Client) -> client.Result:
-    items = api.get("/api/experience", limit=args.limit, offset=args.offset)
+    _require_range("--limit", args.limit, 1, 200)
+    _require_range("--offset", args.offset, 0)
+    _require_range("--author-id", args.author_id, 1)
+    # 没给的筛选参数**不能带进请求**：把 None 塞进查询串，
+    # 服务端会读到字符串 "None"，然后当成一个真的筛选条件——
+    # 结果是「筛出 0 条」，跟「参数没给」完全不是一回事，还不好查。
+    query: dict[str, Any] = {"limit": args.limit, "offset": args.offset}
+    for key in ("type", "tag", "author_id"):
+        value = getattr(args, key)
+        if value is not None:
+            query[key] = value
+    items = api.get("/api/experience", **query)
     return client.Result(data=items, message=f"共 {len(items)} 条（offset={args.offset}）")
 
 
@@ -225,6 +274,8 @@ def run_add(args, api: client.Client) -> client.Result:
         body["author_id"] = args.author_id
     if args.activity_id is not None:
         body["activity_id"] = args.activity_id
+    if args.participation_id is not None:
+        body["participation_id"] = args.participation_id
     if args.source:
         body["source"] = args.source
 
@@ -253,11 +304,13 @@ def run_tag(args, api: client.Client) -> client.Result:
       ② tagging.rules.tag() 只返回「要打什么」，没有任何写入入口
       第一层是校验，第二层是结构——结构那层才是真正兜底的。
     """
+    _require_range("--limit", args.limit, 1)
+    rules_mod = _load_rules()
     # 先确认打标器能用，再开始扫库。
     # 不然 --tagger llm 会把整个库扫一遍，最后才告诉你这个打标器还没做。
     try:
-        rules.ensure_available(args.tagger)
-    except rules.TaggerNotImplemented as exc:
+        rules_mod.ensure_available(args.tagger)
+    except rules_mod.TaggerNotImplemented as exc:
         # 退出码给 2（参数问题）而不是 1（别的错）：这不是服务坏了，
         # 是「你要的东西没有，换个 --tagger 再试」。
         # 机器人看到 2 应该改命令，看到 1 才该去查服务。
@@ -267,12 +320,20 @@ def run_tag(args, api: client.Client) -> client.Result:
 
     already = 0
     no_match = 0
+    tagger_error = 0
     pending: list[dict[str, Any]] = []
     for item in scanned:
         if item.get("metadata", {}).get("tags"):
             already += 1
             continue  # ★ 只补空：人工写过的标签一个字都不动
-        new_tags = rules.tag_with(args.tagger, item.get("content", ""))
+        try:
+            new_tags = rules_mod.tag_with(args.tagger, item.get("content", ""))
+        except Exception:
+            # 单条内容把打标器弄炸（编码、正则、奇形怪状的正文都碰得到），
+            # 不该让整趟「定期跑一次」白跑：跳过它、记一笔，继续扫后面的。
+            # 这一步全在写之前，所以跳过它是安全的——没有任何写入发生。
+            tagger_error += 1
+            continue
         if new_tags:
             pending.append({"exp_id": item["exp_id"], "tags": new_tags})
         else:
@@ -282,11 +343,12 @@ def run_tag(args, api: client.Client) -> client.Result:
         "scanned": len(scanned),
         "already_tagged": already,
         "no_keyword_match": no_match,
+        "tagger_error": tagger_error,
     }
 
     if args.dry_run:
         return client.Result(
-            data={**counts, "tagged": 0, "dry_run": True, "pending": pending},
+            data={**counts, "tagged": 0, "dry_run": True, "pending": pending, "verify": None},
             message=(
                 f"会补 {len(pending)} 条（扫了 {len(scanned)} 条，"
                 f"已有标签 {already} 条，没命中关键词 {no_match} 条）——"
@@ -298,16 +360,55 @@ def run_tag(args, api: client.Client) -> client.Result:
     # 服务端也只收 tags（多传会 422）。tags 是**整份替换**不是追加，
     # 所以这里发的是算好的完整标签列表。
     done: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
     for item in pending:
-        api.patch(f"/api/experience/{item['exp_id']}", {"tags": item["tags"]})
+        try:
+            api.patch(f"/api/experience/{item['exp_id']}", {"tags": item["tags"]})
+        except client.ApiError as exc:
+            # 常见的一条是 404：扫库和写库之间这条经验被人删了。
+            # 为它中断整趟跑，会让前面已经补好的几十条连个交代都没有，
+            # 所以记下来接着走，最后一起报。写请求本身是幂等的，重跑一遍就补上。
+            failed.append({**item, "error": str(exc)})
+            continue
         done.append(item)
 
+    message = (
+        f"补了 {len(done)} 条（扫了 {len(scanned)} 条，"
+        f"已有标签 {already} 条，没命中关键词 {no_match} 条）"
+    )
+    if failed:
+        message += f"，另有 {len(failed)} 条没写成功"
+
+    # --verify：写完之后照原样再扫一遍，看还有没有能补的。
+    # 规则版打标会把自己刚打的标签认成「已有标签」而跳过，
+    # 所以第二遍一条都不用补才算对得上 K8 那条「跑两遍结果一样」。
+    # 这正是「只补空、不覆盖」那条硬要求的机器可验证版本——
+    # 光靠肉眼看「有没有被动过」是看不出来的。
+    verify = None
+    if args.verify:
+        rescan = _scan_experiences(api, args.limit)
+        still = [
+            it["exp_id"]
+            for it in rescan
+            if not it.get("metadata", {}).get("tags")
+            and rules_mod.tag_with(args.tagger, it.get("content", ""))
+        ]
+        verify = {"rescan": len(rescan), "still_pending": len(still), "ids": still}
+        if still:
+            message += f"；⚠ 再扫一遍还有 {len(still)} 条能补上（不是幂等，查一下打标器）"
+        else:
+            message += "；再扫一遍没有要补的了（幂等）"
+
     return client.Result(
-        data={**counts, "tagged": len(done), "dry_run": False, "items": done},
-        message=(
-            f"补了 {len(done)} 条（扫了 {len(scanned)} 条，"
-            f"已有标签 {already} 条，没命中关键词 {no_match} 条）"
-        ),
+        data={
+            **counts,
+            "tagged": len(done),
+            "dry_run": False,
+            "items": done,
+            "failed": failed,
+            "verify": verify,
+        },
+        message=message,
     )
 
 
@@ -332,6 +433,46 @@ def _scan_experiences(api: client.Client, limit: int) -> list[dict]:
 
 # ══ 帮手 ═════════════════════════════════════════════════════
 
+def _load_rules():
+    """取打标器模块（tagging.rules），拿不到就明确报错。
+
+    为什么不在模块顶层直接用它：tagging/ 是 K8 新加的一块，
+    它还没合进来的时候，顶层 import 失败会让**整个** cli exp 都用不了——
+    包括机器人真正在用的 search 和 add。所以顶层那份导入是容错的
+    （失败就把 rules 置成 None），到真要打标的时候在这里说清楚。
+    """
+    if rules is None:
+        raise client.ApiError(
+            "not_implemented",
+            "tagging/ 模块还不在这个仓库里，打标子命令暂时用不了；"
+            "检索、查看、录入不受影响",
+            client.EXIT_USAGE,
+        )
+    return rules
+
+
+def _require_range(name: str, value, low, high=None) -> None:
+    """参数范围在本地就拦掉，不留给服务端。
+
+    服务端每个 Query 也都有 ge/le，拦得住；但一趟往返之后拿回来的
+    是英文的 Pydantic 校验词（"Input should be less than or equal to 20"），
+    机器人照着这句话不知道该改什么。在这里拦，能直接说清是哪个参数、
+    合法范围是多少。越界的值一律退 2（参数问题），不是 1（服务坏了）。
+
+    可选项没给的时候值是 None，那不算越界，直接放过去——
+    不然 `None < 1` 会抛一个和参数毫无关系的 TypeError。
+    """
+    if value is None:
+        return
+    if value < low or (high is not None and value > high):
+        span = f"{low}–{high}" if high is not None else f"≥{low}"
+        raise client.ApiError(
+            "bad_input",
+            f"{name} 只能是 {span}，给的是 {value}",
+            client.EXIT_USAGE,
+        )
+
+
 def _read_content(args) -> str:
     """把正文从 --content / --content-file / 标准输入里取出来。
 
@@ -345,11 +486,25 @@ def _read_content(args) -> str:
         text = sys.stdin.read()
     elif args.content_file is not None:
         try:
-            text = Path(args.content_file).read_text(encoding="utf-8")
+            # 用 utf-8-sig 读：Windows 上「另存为 UTF-8」写出来的文件常常带 BOM，
+            # 用 utf-8 读会把 BOM 留在正文最前面（一个看不见的 \ufeff），
+            # 存进库以后网页上、检索结果里都跟着它走。utf-8-sig 两种都读得对。
+            text = Path(args.content_file).read_text(encoding="utf-8-sig")
         except OSError as exc:
             raise client.ApiError(
                 "bad_input",
                 f"读不了文件 {args.content_file}：{exc.strerror or exc.__class__.__name__}",
+                client.EXIT_USAGE,
+            ) from exc
+        except UnicodeDecodeError as exc:
+            # ★ 这个分支不是 OSError，所以以前它会漏出去变成一整屏 traceback。
+            # Windows 上记事本另存为 ANSI（GBK）是最常见的写法，
+            # 部里发过来的讲稿十有八九就是这种——要给出能照做的提示，
+            # 而不是让机器人把一段栈当成错误消息发进群里。
+            raise client.ApiError(
+                "bad_input",
+                f"读不了文件 {args.content_file}：不是 UTF-8 编码"
+                f"（第 {exc.start} 字节）。请在编辑器里另存为 UTF-8 再试",
                 client.EXIT_USAGE,
             ) from exc
     else:
