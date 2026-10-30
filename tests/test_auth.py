@@ -76,11 +76,12 @@ def test_配了口令后远端写请求被拦(remote, monkeypatch):
     assert "口令" in resp.json()["detail"]
 
 
-def test_所有写方法都被拦(remote, monkeypatch):
+def test_所有方法都被拦(remote, monkeypatch):
     """★ 只拦 POST 是个经典的漏法。
 
     标签是用 PATCH 改的、经验是用 DELETE 删的——只守 POST 等于
       "能改能删但不能加"，比完全不设防还难察觉。
+    2026-10-30 起 GET 也在清单里（见 test_读接口不登录也用不了）。
     """
     monkeypatch.setenv("KB_SHARED_PASSWORD", PASSWORD)
 
@@ -88,6 +89,7 @@ def test_所有写方法都被拦(remote, monkeypatch):
     assert remote.patch(f"{WRITE_PATH}/exp-1", json={"tags": []}).status_code == 401
     assert remote.delete(f"{WRITE_PATH}/exp-1").status_code == 401
     assert remote.post("/api/members", json={}).status_code == 401
+    assert remote.get(WRITE_PATH).status_code == 401
 
 
 def test_中文口令走请求头要百分号编码(remote, monkeypatch):
@@ -239,11 +241,35 @@ def test_回环地址免口令(monkeypatch):
         assert resp.status_code == 422, f"回环地址 {host} 被拦了，机器人会连不上"
 
 
-def test_读接口不登录也能用(remote, monkeypatch):
-    """★ 读是给部员用的，那正是这套东西的意义，不能被口令挡住。"""
+def test_读接口不登录也用不了(remote, monkeypatch):
+    """★ 2026-10-30 改的：读也要口令。
+
+    原来 GET 是放行的，理由是「读是给部员用的」。但服务绑在 0.0.0.0 上，
+    那个理由的实际含义是「校园网里任何一台设备都能读全部成员和经验」。
+    库里已经是真实数据了，所以这条改成正向断言——
+    谁把 "GET" 从 GUARDED_METHODS 里拿掉，这里立刻红。
+    """
     monkeypatch.setenv("KB_SHARED_PASSWORD", PASSWORD)
 
-    assert remote.get("/api/meta").status_code == 200
+    assert remote.get("/api/meta").status_code == 401
+    assert remote.get("/api/members").status_code == 401
+    assert remote.get("/api/experience").status_code == 401
+
+
+def test_健康检查和登录态查询免口令(remote, monkeypatch):
+    """这两条必须放行，否则页面连「该不该显示登录框」都问不到。
+
+    /api/auth/me 被拦的话前端永远拿到 401：登录框出不来、已登录状态也出不来，
+    页面就卡在未登录，而且看不出原因——所以它和 /api/health 一起列在
+    EXEMPT_PATHS 里。
+    """
+    monkeypatch.setenv("KB_SHARED_PASSWORD", PASSWORD)
+
+    assert remote.get("/api/health").status_code == 200
+    me = remote.get("/api/auth/me")
+    assert me.status_code == 200
+    assert me.json()["auth_enabled"] is True
+    assert me.json()["logged_in"] is False
 
 
 def test_页面本身不登录也能打开(remote, monkeypatch):
