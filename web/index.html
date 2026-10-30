@@ -1515,6 +1515,8 @@ async function doLogin() {
     });
     input.value = '';
     renderAuth();
+    // 读接口现在也要口令：未登录时 init 跳过了数据加载，登录后在这里补上
+    await loadEverything();
   } catch (e) {
     input.classList.add('bad');
     // 口令不对和"接口连不上"要分开说——都写成"口令错误"会把人带偏
@@ -1534,6 +1536,9 @@ async function doLogout() {
   // 界面说着"已退出"、刷新一下又成了登录状态，看着像灵异事件。
   // 重新问服务端一次，以它说的为准。
   await loadAuth();
+  // 读接口要口令了：退出之后页面上不能还留着刚才看到的数据。
+  // 刷新最省事，而且不会漏（init 会看到「未登录」而跳过加载）。
+  location.reload();
 }
 
 document.getElementById('btn-login').onclick = doLogin;
@@ -1542,8 +1547,8 @@ document.getElementById('auth-pw').addEventListener('keydown', ev => {
   if (ev.key === 'Enter') doLogin();
 });
 
-(async () => {
-  await loadAuth();   // 先问服务端要不要口令，再决定入口藏不藏
+// 数据加载整段抽出来：登录成功后要能再跑一遍（见 doLogin）。
+async function loadEverything() {
   await loadMeta();
   fill(document.getElementById('e-type'), META.experience_types.map(t => ({ value: t, label: t })));
   fill(document.getElementById('nm-status'), META.member_status.map(t => ({ value: t, label: t })));
@@ -1560,6 +1565,15 @@ document.getElementById('auth-pw').addEventListener('keydown', ev => {
   loadActivities();
   loadParticipations();
   loadReports();
+}
+
+(async () => {
+  await loadAuth();   // 先问服务端要不要口令，再决定入口藏不藏
+  // ★ 读接口现在也要口令了。未登录时**不要**去拉数据：
+  //   否则每个列表都会显示「加载失败：这个操作要口令」，
+  //   看着像服务坏了，实际只是还没登录。
+  if (AUTH.auth_enabled && !AUTH.logged_in) return;
+  await loadEverything();
 })();
 </script>
 </body>
