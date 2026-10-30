@@ -54,6 +54,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from tagging import rules
+
 from . import client
 
 # 和服务端 api/schemas.py 的 EXPERIENCE_TYPES 保持一致。
@@ -74,6 +76,10 @@ DEFAULT_MIN_SIMILARITY = 0.45
 # 定在 0.55：实测两条漏网的不相干问句落在 0.53 上下，会落进这一档被标记。
 # 两个数的来历和「为什么不能一刀切」见文件开头。
 CONFIDENT_SIMILARITY = 0.55
+
+# 服务端 GET /api/experience 的 limit 上限就是 200（api/routers/experience.py 的
+# Query(50, ge=1, le=200)）。给大了会被 422 挡住，所以翻页就用这个数。
+PAGE_SIZE = 200
 
 
 # ══ 子命令注册 ═══════════════════════════════════════════════
@@ -136,6 +142,25 @@ def register(sub, parents) -> None:
     p = actions.add_parser("delete", parents=parents, help="⚠ 删除一条经验，删了找不回来")
     p.add_argument("exp_id", help="形如 exp-1")
     p.set_defaults(run=run_delete)
+
+    p = actions.add_parser(
+        "tag",
+        parents=parents,
+        help="K8 给**还没标签**的经验补标签（只补空，绝不覆盖已有标签）",
+    )
+    p.add_argument(
+        "--tagger",
+        choices=rules.TAGGER_NAMES,
+        default="rules",
+        help="打标器，默认 rules。llm 还没实现，给了会明确报错退出",
+    )
+    p.add_argument("--limit", type=int, default=PAGE_SIZE, help=f"最多扫多少条，默认 {PAGE_SIZE}")
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="只列出来要打什么标签，一个写请求都不发（第一次跑建议先加这个）",
+    )
+    p.set_defaults(run=run_tag)
 
 
 # ══ 各动作的实现 ═════════════════════════════════════════════
@@ -213,6 +238,96 @@ def run_add(args, api: client.Client) -> client.Result:
 def run_delete(args, api: client.Client) -> client.Result:
     api.delete(f"/api/experience/{args.exp_id}")
     return client.Result(data={"deleted": args.exp_id}, message=f"已删除 {args.exp_id}")
+
+
+def run_tag(args, api: client.Client) -> client.Result:
+    """给没标签的经验补标签（K8）。
+
+    ★ 流程是「先翻页扫完 → 再逐条写」，不边翻边写。
+      边翻边写会让「这次补了几条」说不清：翻页期间自己写进去的记录
+      会混进后面的页里，数字对不上；中途失败时更难看出到哪儿了。
+      反正打标是幂等的（见 tagging/rules.py），先扫后写更简单也更安全。
+
+    ★ 「只补空」在两层拦着：
+      ① 下面循环里的 `if metadata["tags"]: continue`
+      ② tagging.rules.tag() 只返回「要打什么」，没有任何写入入口
+      第一层是校验，第二层是结构——结构那层才是真正兜底的。
+    """
+    # 先确认打标器能用，再开始扫库。
+    # 不然 --tagger llm 会把整个库扫一遍，最后才告诉你这个打标器还没做。
+    try:
+        rules.ensure_available(args.tagger)
+    except rules.TaggerNotImplemented as exc:
+        # 退出码给 2（参数问题）而不是 1（别的错）：这不是服务坏了，
+        # 是「你要的东西没有，换个 --tagger 再试」。
+        # 机器人看到 2 应该改命令，看到 1 才该去查服务。
+        raise client.ApiError("not_implemented", str(exc), client.EXIT_USAGE) from exc
+
+    scanned = _scan_experiences(api, args.limit)
+
+    already = 0
+    no_match = 0
+    pending: list[dict[str, Any]] = []
+    for item in scanned:
+        if item.get("metadata", {}).get("tags"):
+            already += 1
+            continue  # ★ 只补空：人工写过的标签一个字都不动
+        new_tags = rules.tag_with(args.tagger, item.get("content", ""))
+        if new_tags:
+            pending.append({"exp_id": item["exp_id"], "tags": new_tags})
+        else:
+            no_match += 1  # 一个关键词都没命中，留着下次（或人工）再打
+
+    counts = {
+        "scanned": len(scanned),
+        "already_tagged": already,
+        "no_keyword_match": no_match,
+    }
+
+    if args.dry_run:
+        return client.Result(
+            data={**counts, "tagged": 0, "dry_run": True, "pending": pending},
+            message=(
+                f"会补 {len(pending)} 条（扫了 {len(scanned)} 条，"
+                f"已有标签 {already} 条，没命中关键词 {no_match} 条）——"
+                "--dry-run，一个写请求都没发"
+            ),
+        )
+
+    # 逐条 PATCH。★ 只发 {"tags": [...]}：正文/作者/活动 id 都不在这次的职责里，
+    # 服务端也只收 tags（多传会 422）。tags 是**整份替换**不是追加，
+    # 所以这里发的是算好的完整标签列表。
+    done: list[dict[str, Any]] = []
+    for item in pending:
+        api.patch(f"/api/experience/{item['exp_id']}", {"tags": item["tags"]})
+        done.append(item)
+
+    return client.Result(
+        data={**counts, "tagged": len(done), "dry_run": False, "items": done},
+        message=(
+            f"补了 {len(done)} 条（扫了 {len(scanned)} 条，"
+            f"已有标签 {already} 条，没命中关键词 {no_match} 条）"
+        ),
+    )
+
+
+def _scan_experiences(api: client.Client, limit: int) -> list[dict]:
+    """翻页把经验取回来，最多 limit 条。
+
+    取回来的每页都是「当时的快照」，服务端没有游标，翻页靠 offset。
+    打标是加标签而不是插记录，条目数不会在翻页途中变多，
+    所以 offset 翻页在这里够用。
+    """
+    items: list[dict] = []
+    offset = 0
+    while len(items) < limit:
+        want = min(PAGE_SIZE, limit - len(items))
+        page = api.get("/api/experience", limit=want, offset=offset)
+        items.extend(page)
+        if len(page) < want:
+            break  # 已经到底了
+        offset += len(page)
+    return items[:limit]
 
 
 # ══ 帮手 ═════════════════════════════════════════════════════

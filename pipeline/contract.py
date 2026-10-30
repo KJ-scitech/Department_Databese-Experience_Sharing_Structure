@@ -69,7 +69,7 @@ MEMBER_FIELDS = (
     Field("major", str, note="专业"),
     Field("join_term", str, note="入部学年，如2026-2027"),
     Field("org_unit", str, note="所属组"),
-    Field("title", str, note="部长/副部长/组长/组员"),
+    Field("title", str, note="部长/副部长/组长/部员"),
     Field("phone", str, sensitive=True, note="手机"),
     Field("qq", str, sensitive=True),
     Field("wechat", str, sensitive=True),

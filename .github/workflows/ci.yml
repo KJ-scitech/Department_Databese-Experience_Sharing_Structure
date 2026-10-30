@@ -1,0 +1,114 @@
+# 合并门禁：push 到 main、以及所有 PR，都在云端 runner 上跑一遍完整测试。
+#
+# ★ 这份文件是补上的。docs/CI-CD说明.md 和 README 从 PR #2 起就写着
+#   「.github/workflows/ci.yml 负责 CI」，但仓库里**从来没有这个文件**——
+#   也就是说着文档里的「红了不许合」从来没发生过，PR 一次都没跑过测试。
+#   现在把说法补齐成正的事实。
+#
+# ★ 首次 push 时请盯一眼这一步：这份 YAML 在本地没法真跑（要 push 才会执行）。
+#   本地做过的验证：`python -m scripts.seed` 和 `python -m pytest -q` 都手跑通过；
+#   YAML 过了一遍解析器；环境变量名逐个对过 api/config.py。
+#
+#   本地**验证不到**的部分，真红了先怀疑这几处：
+#     · `scripts.init_db` 没法在本机复验——它是非幂等的（裸 CREATE TABLE，
+#       库已存在就报 1050），而本机库早建好了。CI 的库每次都是全新的，
+#       所以那才是这个脚本第一次干净地跑一遍。
+#     · mysql 容器里 root 能不能被外部连上（本机没有 docker，只能按官方镜像的
+#       规则写，见 MYSQL_ROOT_HOST）
+#     · 云端 runner 下 bge-small-zh 那 93MB 能不能顺利拉下来（墙外应该更快，
+#       但这条路没走过）
+#     · 锁版本的 torch / transformers 在 3.11 上有没有 wheel
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # 手动触发：改了 workflow 想立刻验一遍，不用为了触发而空提交一次
+  workflow_dispatch:
+
+# 同一分支上新的推送作废掉还在排队的旧任务。
+# 不加的话，连着推三次会在免费额度里排三个跑同样东西的任务。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      # ★ 这里用 mysql:8.0 而不是文档原先写的 MariaDB。
+      #   理由：开发机是 MySQL 8，CI 要挡的是**开发机上的**回归。
+      #   服务器的 MariaDB 是另一回事，差异记在 docs/CI-CD说明.md 里，
+      #   别一次换两个变量——那样红了分不清是谁的锅。
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          # 显式声明 root 能从任意主机连。理由：容器里的 MySQL 看到的客户端 IP
+          # 是 docker 网关（172.17.0.1），不是 localhost，而镜像默认只建
+          # root@localhost，匹配不上就是一句看着像密码错的 access denied。
+          # ★ 这一条**没能在本地验证**（本机没有 docker）。写死它是防御性的：
+          #   镜像各版本对 MYSQL_ROOT_HOST 的默认值变过，显式写清楚不会有坏处。
+          MYSQL_ROOT_HOST: '%'
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+
+    env:
+      # 这些是 api/config.py 读的名字。CI 上没有 .env 文件（它不进仓库），
+      # 靠这里的环境变量提供；load_dotenv 不覆盖已存在的环境变量，所以两边不打架。
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_NAME: scitech_kb
+      # ★ 云端 runner 在墙外，直连 huggingface.co 比国内镜像快。
+      #   api/config.py 用的是 setdefault，环境变量优先，所以这里设了就生效。
+      HF_ENDPOINT: https://huggingface.co
+      # 关掉 xet 传输协议（同 config.py 的理由：走它会卡住，报错还跟网络无关）
+      HF_HUB_DISABLE_XET: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # ★ 3.11 与本机 .venv（3.11.5）对齐。
+          #   requirements.txt 里的 torch / transformers 是锁版本的，
+          #   换个新 Python 未必有对应的 wheel——那种红跟代码无关，纯属白折腾。
+          python-version: '3.11'
+          cache: pip
+
+      # ★ 这个缓存很值：bge-small-zh 约 93MB，每次 CI 重下要几分钟。
+      #   注意它只缓存「模型」，不缓存 pip 的包（那个由上面的 cache: pip 管）。
+      - name: 缓存 embedding 模型
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-bge-small-zh-v1.5
+
+      - name: 装依赖
+        # 不换 PyPI 镜像：runner 在墙外，官方源反而快。
+        # （本机装依赖才需要 -i 清华源，见 requirements.txt 开头。）
+        run: pip install -r requirements.txt
+
+      - name: 建库建表
+        run: python -m scripts.init_db
+
+      - name: 造演示数据
+        # 这一步会加载 embedding 模型（第一次跑就是在这里下载的）
+        run: python -m scripts.seed
+
+      - name: 跑测试
+        # ★ 全量跑，不跳过模型相关的用例。
+        #   tests/conftest.py 的 client 夹具一进 lifespan 就加载模型，
+        #   而 K1/K2/K5 的核心验收全用 seeded——跳过等于把核心验收全跳过，
+        #   这个门禁就白设了。贵的一次性成本用上面的缓存摊掉。
+        run: python -m pytest -q

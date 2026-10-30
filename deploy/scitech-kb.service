@@ -6,10 +6,11 @@
 # 共享账号没有 sudo，/etc/systemd/system/ 对它只读。
 # 装这个单元要找服务器管理员。详细步骤见同目录的 部署说明.md。
 #
-# 文件里的账号名和路径都是占位写法（<共享账号>）。
-# 真实账号名见交接文档——本仓库是公开的，基础设施信息不写进来。
-# 代码放在别的地方就要同步改下面六处：
-#   User / Group / WorkingDirectory / ExecStart / ReadWritePaths / Environment=HF_HOME
+# 文件里的账号名和路径都是占位写法（<服务账号> / <共享组> / <部署目录>）。
+# 真实值见交接文档——本仓库是公开的，基础设施信息不写进来。
+# 代码放在别的地方就要同步改下面这几处：
+#   User / Group / WorkingDirectory / ExecStart /
+#   ReadWritePaths / Environment=HF_HOME / Environment=HOME
 #
 # 改完必须跑 systemctl daemon-reload，否则 systemd 还用旧配置，
 # 而且不会报任何错——典型的"改了没生效"。
@@ -17,25 +18,42 @@
 [Unit]
 Description=学创部知识库 API（FastAPI + Chroma 向量检索）
 Documentation=https://github.com/KJ-scitech/Department_Databese-Experience_Sharing_Structure
-After=network-online.target mysql.service
+After=network-online.target mariadb.service
 Wants=network-online.target
-# 如果服务器上的 MySQL 单元名不是 mysql.service，
-# 用 `systemctl list-units --type=service | grep -i mysql` 查一下实际名字再改。
-# 名字写错不会导致服务起不来，只是少了"等数据库就绪"这层保护。
+# ★ 2026-09-22 在 M710q 上实测：这台机器上的数据库是 **MariaDB 10.11**，
+#   单元名是 `mariadb.service`，**没有** `mysql.service`。
+#   原来这里写的是 mysql.service —— 对不上号，等于没有"等数据库就绪"这层保护，
+#   服务可能抢在数据库前面起来，然后在启动那一屏报连不上库。
+#   （`After=` 写一个不存在的单元名**不会让服务起不来**，只是静默失效，
+#     所以这个错从日志里看不出来。改单元名前先查：
+#     systemctl list-units --type=service --all | grep -iE "maria|mysql"）
+#   换一台机器部署的话，这行要跟着那台机器的实际单元名改。
 
 [Service]
 Type=simple
-User=<共享账号>
-Group=<共享账号>
-WorkingDirectory=/home/<共享账号>/knowledge-base
+User=<服务账号>
+Group=<共享组>
+WorkingDirectory=<部署目录>
 
-ExecStart=/home/<共享账号>/knowledge-base/.venv/bin/python -m uvicorn api.main:app \
-    --host 127.0.0.1 --port 8000
+ExecStart=<部署目录>/.venv/bin/python -m uvicorn api.main:app \
+    --host 0.0.0.0 --port 8000
 
-# 只监听回环地址：QQBot 和知识库在同一台机器上，走 127.0.0.1 就够了。
-# 绑 127.0.0.1 而不是 0.0.0.0，是因为 CORS 现在是 allow_origins=["*"]，
-# 直接对外暴露等于把整个库（含成员信息）敞给能连到这个端口的人。
-# 以后确实需要外部访问，先收紧 CORS 再改这里。
+# ★ 绑 0.0.0.0 是为了让部员在校内网打开 http://<服务器内网IP>:8000 ——
+#   页面要给人用，就得对外。**这里从 127.0.0.1 改过来，是上线的开关。**
+#
+#   改之前必须确认两件事，否则等于把库敞开：
+#     1. .env 里配了 KB_SHARED_PASSWORD（否则写接口不设防）。
+#        启动日志第一屏会明说当前是"已启用"还是"未启用"。
+#     2. 读接口对外是**有意**的：/api/experiences、/api/cards、/api/reports
+#        不登录也能看。介绍卡走的是 v_member_public 视图，只含能对外说的字段；
+#        但经验正文会变成"校内可见"，记的时候心里要有数。
+#
+#   防护是 api/auth.py 那个中间件，不是这个文件：所有写方法（POST/PUT/PATCH/
+#   DELETE）都要口令，本机 127.0.0.1 免口令（机器人走这条）。
+#
+#   还有两件没做的，写在这里免得忘：
+#     · 没上 HTTPS。口令和 cookie 在校内网里是明文，被嗅探就能拿到。
+#     · 写接口是**一个共享口令**，不区分是谁写的。要真身份得上学校 CAS。
 
 # 日志直接进 journald，用 journalctl 看：
 #   journalctl -u scitech-kb -f
@@ -43,7 +61,11 @@ Environment=PYTHONUNBUFFERED=1
 
 # 向量模型缓存。不固定这个路径的话会落到 ~/.cache/huggingface，
 # 而下面 ProtectHome 把家目录设成了只读，模型下不下来、服务起不来。
-Environment=HF_HOME=/home/<共享账号>/knowledge-base/.cache/huggingface
+Environment=HF_HOME=<部署目录>/.cache/huggingface
+
+# 服务账号通常是 nologin、home 也不可写。指一个可写的 HOME 给它，
+# 免得有库想往 $HOME 写东西时报一个跟业务毫无关系的错。
+Environment=HOME=/var/lib/<服务账号>
 
 Restart=always
 RestartSec=5
@@ -61,7 +83,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/<共享账号>/knowledge-base/data /home/<共享账号>/knowledge-base/.cache
+ReadWritePaths=<部署目录>/data <部署目录>/.cache
 
 [Install]
 WantedBy=multi-user.target
