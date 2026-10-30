@@ -34,6 +34,42 @@ SEATABLE_DTABLE_UUID = os.getenv("SEATABLE_DTABLE_UUID", "")
 SEATABLE_MEMBER_TABLE = os.getenv("SEATABLE_MEMBER_TABLE", "")
 SEATABLE_LEDGER_TABLE = os.getenv("SEATABLE_LEDGER_TABLE", "")
 
+# ── 网页写接口的口令 ──────────────────────────────────────────
+# 页面要给部员用，就得绑到校园网上；绑出去之后，写接口（录经验、登记分工、
+# 新增成员）再没有门槛，等于谁知道地址谁都能改。
+#
+# 这里放一个**部门共享口令**：部员在页面上输一次，之后靠 cookie 记住。
+# 它只挡「校园网里乱逛进来的人」——不区分是谁写的，也没有按人限权。
+# 要真身份就得上学校的 CAS，schema 里的 account 表就是为那个准备的。
+#
+# 不配这个值 = 鉴权整个关闭（本地开发、跑测试时就是这样），
+# 启动时会大声警告一句。服务器上的 .env 必须配上。
+def shared_password() -> str:
+    """每次调用现读，不缓存在模块常量里。
+
+    ★ 为什么不用 `KB_SHARED_PASSWORD = os.getenv(...)` 那种写法：
+      测试要用 monkeypatch 换成别的值来验「配上口令之后写接口会被拦」，
+      而模块常量在 import 那一刻就固化了，之后再改环境变量没有任何作用。
+      这个问题和 api/config.py 里 HF_ENDPOINT 那条注释说的是同一件事。
+    """
+    return os.getenv("KB_SHARED_PASSWORD", "")
+
+
+def cors_origins() -> list[str]:
+    """允许跨域的来源，逗号分隔，从 .env 读。
+
+    ★ 为什么默认是空的、而不是像以前那样写 `["*"]`：
+      这个仓库是公开的，服务器 IP 属于基础设施信息，不能写进代码
+      （deploy/scitech-kb.service 里用 <共享账号> 占位也是同一个理由）。
+      服务器上的 .env 写 KB_CORS_ORIGINS=http://<服务器内网IP>:8000 这样。
+
+    ★ 留空时**不加 CORS 中间件**：页面和接口是同一个源，本来就不需要跨域。
+      只有本地换端口调试时才用得上。
+    """
+    raw = os.getenv("KB_CORS_ORIGINS", "")
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
 # ── 向量库 ────────────────────────────────────────────────────
 DATA_DIR = PROJECT_ROOT / "data"
 CHROMA_DIR = DATA_DIR / "chroma"

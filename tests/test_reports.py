@@ -132,3 +132,39 @@ def test_member_history_includes_linked_experience(seeded):
 
 def test_member_history_unknown_member_returns_404(seeded):
     assert seeded.get("/api/members/999999/history").status_code == 404
+
+
+def test_按职务排序(seeded):
+    """★ 报表先按职务（主席 → 部长 → 副部长 → 组长 → 部员），同一职务里才按次数。
+
+    原来是纯按次数排，于是一次没干过的主席/部长落在最后一行。
+    改顺序有两条路：改数字、或者改排序规则。这里钉住的是后者——
+    断言的是「权重单调不减」，跟具体是谁无关，种子数据换了也不会误红。
+    """
+    from api import schemas
+
+    titles = {m["name"]: m.get("title") for m in seeded.get("/api/members").json()}
+    rows = seeded.get("/api/reports/by-member").json()
+    ranks = [schemas.title_rank(titles.get(r["name"])) for r in rows]
+
+    assert ranks == sorted(ranks), (
+        "报表没按职务排：" + str([(r["name"], titles.get(r["name"])) for r in rows])
+    )
+
+
+def test_数字是真次数(seeded):
+    """★ total 必须等于这个人真实的参与记录条数。
+
+    有了排序规则之后还剩一条歪路：直接把某个人的 total 改大来让他排前面。
+    这条把数字钉回真实来源——对不上就红。
+    """
+    parts = seeded.get("/api/participations", params={"limit": 200}).json()
+    real: dict[int, int] = {}
+    for p in parts:
+        real[p["member_id"]] = real.get(p["member_id"], 0) + 1
+
+    rows = seeded.get("/api/reports/by-member").json()
+    wrong = [(r["name"], r["total"], real.get(r["member_id"], 0))
+             for r in rows if r["total"] != real.get(r["member_id"], 0)]
+
+    assert not wrong, f"报表的次数跟真实参与记录对不上（姓名, 报表, 实际）：{wrong}"

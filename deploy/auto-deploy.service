@@ -5,12 +5,33 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-# 用 root 跑：脚本最后要 restart 系统级服务 scitech-kb，
-# 普通用户没这个权限。若改成普通用户，需另配 polkit/sudo 规则。
-# 注意：root 跑 git 会因目录属主不是 root 而报 "dubious ownership"，
-# auto-deploy.sh 里已用 safe.directory 处理。
-User=root
-WorkingDirectory=/home/ubuntu/knowledge-base
+
+# ── 以「服务账号」身份运行，不是 root ──────────────────────────
+# 用 root 的诱惑在于：脚本最后要 `systemctl restart scitech-kb`，
+# 而普通用户没这个权限。但用 root 会带来一个安静的坏结果：
+# git 拉下来的新文件属主是 root，而服务是以服务账号跑的，
+# 服务随后可能写不动 data/ —— 症状是「自动部署成功，但服务起不来」。
+#
+# 正确做法是让这个单元以**服务账号**运行，再单独给它一条
+# 只放开 `systemctl restart scitech-kb` 的免密规则
+# （见 deploy/部署说明.md 第五节）。两件事都办不到之前，用 root 也能跑，
+# 但要记住上面那个后果。
+#
+# ── 为什么要把 HOME / GIT_CONFIG_GLOBAL 钉死 ───────────────────
+# 服务账号通常是 nologin、home 也不可写，而 git 有两处要写：
+#   * 仓库属主不是当前用户时，git 一律拒绝操作（报 dubious ownership），
+#     解法是 `git config --global --add safe.directory <目录>`；
+#   * 而 `--global` 写在 $HOME/.gitconfig 里，home 不可写就写不进去，
+#     上面那条解法静默失效，报错还是 dubious ownership。
+# 给它一个可写的目录专门放 git 配置，这个坑就绕过去了。
+#
+# ★ 装上之前，把下面所有 <服务账号> / <部署目录> 换成真实值。
+#   漏换的报错是「目录不存在」，不会提示你占位符没换。
+#   本仓库是公开的，真实账号名不写进来，理由同 scitech-kb.service。
+User=<服务账号>
+WorkingDirectory=<部署目录>
+Environment=HOME=/var/lib/<服务账号>
+Environment=GIT_CONFIG_GLOBAL=/var/lib/<服务账号>/.gitconfig
 Environment=KB_SERVICE=scitech-kb
-Environment=KB_DIR=/home/ubuntu/knowledge-base
-ExecStart=/home/ubuntu/knowledge-base/deploy/auto-deploy.sh
+Environment=KB_DIR=<部署目录>
+ExecStart=<部署目录>/deploy/auto-deploy.sh

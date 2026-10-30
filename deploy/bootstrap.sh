@@ -42,7 +42,7 @@ cat <<'EOF'
 
 完成。下一步：
   1. 起服务验证：
-       cd ~/knowledge-base && .venv/bin/python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
+       cd <部署目录> && .venv/bin/python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
   2. 配 systemd 托管：见 deploy/部署说明.md 第五节
   3. 开自动部署（CI/CD 的 CD 部分）：见 docs/CI-CD说明.md
 EOF
