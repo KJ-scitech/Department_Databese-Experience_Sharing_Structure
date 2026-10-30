@@ -135,6 +135,9 @@ def meta():
         "participation_roles": list(schemas.PARTICIPATION_ROLES),
         "member_status": list(schemas.MEMBER_STATUS),
         "activity_status": list(schemas.ACTIVITY_STATUS),
+        # 职务的展示顺序（主席在前、部员在后）。前端拿它给成员列表和下拉框排序，
+        # 这样"职务高的排前面"只有一份定义，接口和页面不会各排各的。
+        "title_order": list(schemas.TITLE_ORDER),
     }
 
 

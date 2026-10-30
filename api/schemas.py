@@ -169,6 +169,21 @@ class ActivityOut(BaseModel):
 PARTICIPATION_ROLES = ("负责人", "主讲", "执行", "志愿者", "观众", "参与")
 
 
+# 职务的展示顺序，从高到低。
+# ★ 它只用来**排序**，不做校验——理由同上：这一列是开放的 VARCHAR，
+#   历史数据或机器人可能写别的说法，硬拦会把合法记录挡在门外。
+#   排不上号的（空值、"指导老师"这类）统一排到最后，不会丢人。
+TITLE_ORDER = ("主席", "部长", "副部长", "组长", "部员")
+
+
+def title_rank(title: str | None) -> int:
+    """职务的排序权重：越小越靠前；排不上号的给一个大值，落在最后。"""
+    try:
+        return TITLE_ORDER.index(title or "")
+    except ValueError:
+        return len(TITLE_ORDER)
+
+
 class ParticipationCreate(BaseModel):
     activity_id: int
     member_id: int
