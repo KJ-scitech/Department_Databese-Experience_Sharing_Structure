@@ -264,3 +264,12 @@ def test_相似度分档和命令行是同一组数(html):
     assert str(CONFIDENT_SIMILARITY) in html, (
         f"页面上找不到 {CONFIDENT_SIMILARITY}（CLI 的高置信阈值）。"
     )
+
+
+def test_成员排序用的是接口给的职务顺序(html):
+    """页面按 /api/meta 的 title_order 排成员，不硬写第二份顺序。
+
+    硬写的坏处：以后职务变了（加个「常务副部长」之类），接口和页面各写一份，
+    改一处漏一处，排序就悄悄不一致了。
+    """
+    assert "title_order" in html, "页面没有用接口给的职务顺序"
