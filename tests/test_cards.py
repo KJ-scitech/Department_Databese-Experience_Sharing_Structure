@@ -133,6 +133,23 @@ def test_as_list_handles_every_shape():
     assert _as_list({"1": "Python", "2": "SQL"}) == ["Python", "SQL"]
 
 
+def test_as_list_drops_blank_strings_consistently():
+    """纯空白在标量、列表、字典里都要被丢弃，不能留下空壳。"""
+    assert _as_list("  ") == []
+    assert _as_list(["  ", "\t\n"]) == []
+    assert _as_list({"1": "  ", "2": None}) == []
+
+    text = member_card_text({"name": "某人", "skills": ["  "]}, [])
+    assert "技能：" not in text
+
+
+def test_as_list_trims_nonblank_strings_consistently():
+    """非空字符串也要统一去掉首尾空白，标量、列表、字典口径一致。"""
+    assert _as_list(" Python ") == ["Python"]
+    assert _as_list([" Python ", None, "", "\t", "SQL "]) == ["Python", "SQL"]
+    assert _as_list({"1": " Python ", "2": "  ", "3": None}) == ["Python"]
+
+
 # ── 下半段：接口 ───────────────────────────────────────────────
 
 def test_every_active_member_has_a_card(seeded, session):

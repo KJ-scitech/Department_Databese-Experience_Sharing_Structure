@@ -45,21 +45,28 @@ def _as_dict(row) -> dict:
 def _as_list(value) -> list[str]:
     """skills / honors 是 JSON 列，可能是 list、可能是 dict、也可能是 NULL。
 
-    统一成「字符串列表」，让下面拼卡片的地方只需要面对一种形状。
+    统一成「非空字符串列表」，让下面拼卡片的地方只需要面对一种形状。
+    每个非 None 元素先转成字符串再去除首尾空白，空字符串和纯空白结果丢弃。
     手填的 JSON 什么样都有可能（`{"1": "优秀部员"}` 这种也不奇怪），
     所以这里不做假设，只保证输出是个干净的列表。
     """
     if value is None:
         return []
-    if isinstance(value, str):
-        return [value] if value.strip() else []
     if isinstance(value, dict):
-        items = list(value.values())
+        items = value.values()
     elif isinstance(value, (list, tuple)):
-        items = list(value)
+        items = value
     else:
-        return [str(value)]
-    return [str(v) for v in items if v not in (None, "")]
+        items = (value,)
+
+    result = []
+    for item in items:
+        if item is None:
+            continue
+        text = str(item).strip()
+        if text:
+            result.append(text)
+    return result
 
 
 def _join(*parts, sep: str = " · ") -> str:
