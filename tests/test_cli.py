@@ -303,7 +303,8 @@ def test_一条都不够像时是no_match不是错误(capsys):
       · 退出码仍然是 0 —— 「没找到」是正常答案，不是错误
       · code 变成 no_match —— 机器人靠这个决定措辞
       · data 是空列表，不是那些凑数的结果
-      · low_confidence 置 true
+      · low_confidence 是 **false** —— 这一档是「一条都不给」，不是
+        「给了但不太准」；机器人该认的是 code="no_match"（2026-10-22 改）
     """
     fake = fake_for((200, [_hit("exp-3", 0.21), _hit("exp-5", 0.18), _hit("exp-1", 0.09)]))
     code, envelope = run_cli(fake, ["exp", "search", "今天中午吃啥"], capsys)
@@ -312,7 +313,7 @@ def test_一条都不够像时是no_match不是错误(capsys):
     assert envelope["ok"] is True
     assert envelope["code"] == "no_match"
     assert envelope["data"] == []
-    assert envelope["low_confidence"] is True
+    assert envelope["low_confidence"] is False
     # 最像的那条分数要报出来，方便定位是阈值定太高还是真的没有
     assert "0.21" in envelope["message"]
 
