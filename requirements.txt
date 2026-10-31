@@ -29,3 +29,22 @@ sentence-transformers==6.0.1
 torch==2.14.0
 transformers==5.17.0
 numpy==2.4.6
+
+# ── 长文进库 K7（ingest/）────────────────────────────────────
+# ★ 这些是 ingest/run_ingest.py 的直接依赖，**必须写在这份文件里**：
+#   CI 和 deploy/auto-deploy.sh 都只按 requirements.txt 装依赖。
+#   单独放一份 requirements-ingest.txt 的话，别人 clone 下来
+#   `pip install -r requirements.txt` 之后跑 K7 会直接 ModuleNotFoundError。
+#
+# 实测版本（2026-10，Python 3.11 / 3.14）：
+#   faster-whisper 1.2.1、opencc-python-reimplemented 0.1.7、
+#   pdfplumber 0.11.10、python-pptx 1.0.2、python-docx 1.2.0、openpyxl 3.1.5
+#
+# 注意：转写模型不在这里。首次跑音频会从 HF 镜像下载
+# （large-v3-turbo 约 1.6GB），缓存到 .cache/huggingface（见 ingest/config.py）。
+faster-whisper==1.2.1
+opencc-python-reimplemented
+pdfplumber
+python-pptx
+python-docx
+openpyxl          # 读 xlsx。不用 pandas：省掉 numpy 那串重依赖，也不会有 nan / 浮点尾巴
